@@ -11,6 +11,8 @@ It is composed of two parts:
 
 2. A Next.js UI allowing the visualization of the agent orchestration process and providing a chat interface.
 
+**New:** This repository now also includes a **Node.js/TypeScript backend** that provides 100% feature parity with the Python version, using the [OpenAI Agents SDK for TypeScript](https://github.com/openai/openai-agents-js).
+
 ![Demo Screenshot](screenshot.jpg)
 
 ## How to use
@@ -70,6 +72,26 @@ npm run dev
 The frontend will be available at: [http://localhost:3000](http://localhost:3000)
 
 This command will also start the backend.
+
+#### Run the Node.js/TypeScript backend
+
+**Quick start (one-line command):**
+
+```bash
+cd node-backend && OPENAI_API_KEY=your_api_key npm run dev
+```
+
+**Or install dependencies first:**
+
+```bash
+cd node-backend
+npm install
+npm run dev
+```
+
+The Node.js backend will be available at: [http://localhost:8000](http://localhost:8000)
+
+This backend provides identical functionality to the Python version, including all 5 agents, 6 tools, guardrails, conversation memory, and handoff capabilities.
 
 ## Customization
 

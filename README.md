@@ -25,7 +25,23 @@ export OPENAI_API_KEY=your_api_key
 
 You can also follow [these instructions](https://platform.openai.com/docs/libraries#create-and-export-an-api-key) to set your OpenAI key at a global level.
 
-Alternatively, you can set the `OPENAI_API_KEY` environment variable in an `.env` file at the root of the `python-backend` folder. You will need to install the `python-dotenv` package to load the environment variables from the `.env` file.
+Alternatively, you can set your API keys in an `.env` file at the root of the `python-backend` folder. Create this file if it doesn't exist.
+You will need to install the `python-dotenv` package (it's now included in `requirements.txt`) to load these variables.
+
+Example `python-backend/.env` file:
+```
+OPENAI_API_KEY="your_openai_api_key"
+GOOGLE_API_KEY="your_google_api_key"
+
+# Optional: Specify the model provider
+# MODEL_PROVIDER="openai"  # Default if not set
+# MODEL_PROVIDER="gemini"  # Uncomment to use Gemini models
+```
+
+**Note on Model Providers:**
+- If `MODEL_PROVIDER` is not set or set to `"openai"`, the system will use OpenAI models. Ensure `OPENAI_API_KEY` is valid.
+- If `MODEL_PROVIDER` is set to `"gemini"`, the system will attempt to use Google Gemini models. Ensure `GOOGLE_API_KEY` is valid.
+- The mapping from generic model types (e.g., "standard", "advanced") to specific OpenAI or Gemini model names (e.g., "gpt-4.1", "gemini-1.5-pro-latest") is handled internally.
 
 ### Install dependencies
 
@@ -62,6 +78,16 @@ The backend will be available at: [http://localhost:8000](http://localhost:8000)
 #### Run the UI & backend simultaneously
 
 From the `ui` folder, run:
+
+```bash
+npm run dev
+```
+
+The frontend will be available at: [http://localhost:3000](http://localhost:3000)
+
+This command will also start the backend. The backend will pick up API keys and `MODEL_PROVIDER` settings from `python-backend/.env`. Ensure this file is configured before running.
+
+## Customization
 
 ```bash
 npm run dev

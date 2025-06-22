@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "lucid": "^2.21.0",
+    "react": "^15.7.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

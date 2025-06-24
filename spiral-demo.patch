@@ -1,0 +1,202 @@
+diff --git a/python-backend/SpiralProvider.py b/python-backend/SpiralProvider.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/python-backend/SpiralProvider.py
+@@
++import os
++import requests
++from agents.providers import BaseProvider, ToolResponse
++
++
++class SpiralProvider(BaseProvider):
++    """
++    Wraps the Hugging Face `spiral_core` endpoint and returns glyph / tone / coherence metadata.
++    """
++
++    def __init__(self, endpoint_url: str | None = None, timeout: int = 30):
++        self.url = endpoint_url or os.getenv("SPIRAL_ENDPOINT")
++        self.timeout = timeout
++
++    def invoke(self, prompt: str) -> ToolResponse:
++        payload = {"inputs": prompt}
++        resp = requests.post(self.url, json=payload, timeout=self.timeout)
++        resp.raise_for_status()
++        result = resp.json()
++        return ToolResponse(
++            output=result["message"],
++            metadata={
++                "glyph": result.get("glyph"),
++                "tone_name": result.get("tone_name"),
++                "coherence": result.get("coherence"),
++            },
++        )
++
+diff --git a/python-backend/SpiralToneAgent.py b/python-backend/SpiralToneAgent.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/python-backend/SpiralToneAgent.py
+@@
++from typing import List
++from agents.agent import Agent
++from agents.schema import Event
++
++
++class SpiralToneAgent(Agent):
++    """
++    Tone‑aware Agent that maintains an EMA coherence score and appends glyph context to every reply.
++    """
++
++    def __init__(self, provider, coherence_alpha: float = 0.8, **kwargs):
++        super().__init__(provider=provider, **kwargs)
++        self.coherence_ema = None
++        self.tone_name = None
++        self.glyph = None
++        self.coherence_alpha = coherence_alpha
++
++    def handle_event(self, events: List[Event]):
++        last_user_msg = events[-1].content
++        tool_resp = self.provider.invoke(last_user_msg)
++
++        meta = tool_resp.metadata or {}
++        self.glyph = meta.get("glyph")
++        self.tone_name = meta.get("tone_name")
++        coherence = meta.get("coherence")
++
++        if coherence is not None:
++            if self.coherence_ema is None:
++                self.coherence_ema = coherence
++            else:
++                self.coherence_ema = (
++                    self.coherence_alpha * coherence
++                    + (1 - self.coherence_alpha) * self.coherence_ema
++                )
++
++        decorated = (
++            f"{tool_resp.output}\n\n"
++            f"— glyph:{self.glyph}  tone:{self.tone_name}  "
++            f"coherence:{self.coherence_ema:.2f}"
++        )
++        return decorated
++
+diff --git a/python-backend/main.py b/python-backend/main.py
+index d964468..abcdef0 100644
+--- a/python-backend/main.py
++++ b/python-backend/main.py
+@@
+-from agents import (
+-    Agent,
+-    RunContextWrapper,
+-    Runner,
+-    TResponseInputItem,
+-    function_tool,
+-    handoff,
+-    GuardrailFunctionOutput,
+-    input_guardrail,
+-)
++from agents import (
++    Agent,
++    RunContextWrapper,
++    Runner,
++    TResponseInputItem,
++    function_tool,
++    handoff,
++    GuardrailFunctionOutput,
++    input_guardrail,
++)
++
++# Spiral imports
++from SpiralProvider import SpiralProvider
++from SpiralToneAgent import SpiralToneAgent
+@@
+-    triage_agent = Agent(
+-        model="gpt-4o-mini",
+-        name="Triage Agent",
+-        instructions=triage_instructions,
+-        tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
+-        input_guardrails=[relevance_guardrail, jailbreak_guardrail],
+-    )
++    # Replace default triage agent with SpiralToneAgent
++    spiral_provider = SpiralProvider()
++    triage_agent = SpiralToneAgent(
++        provider=spiral_provider,
++        name="Spiral Triage Agent",
++        instructions=triage_instructions,
++        tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
++        input_guardrails=[relevance_guardrail, jailbreak_guardrail],
++    )
++
+diff --git a/ui/components/GlyphPanel.tsx b/ui/components/GlyphPanel.tsx
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/ui/components/GlyphPanel.tsx
+@@
++import { useEffect, useState } from "react";
++
++type GlyphData = {
++  glyph: string;
++  tone_name: string;
++  coherence: number;
++};
++
++export default function GlyphPanel({ stream }: { stream: EventSource }) {
++  const [data, setData] = useState<GlyphData | null>(null);
++
++  useEffect(() => {
++    stream.addEventListener("glyph", (e: MessageEvent) => {
++      setData(JSON.parse(e.data));
++    });
++  }, [stream]);
++
++  if (!data) {
++    return <div className="glyph-panel">Waiting for Spiral…</div>;
++  }
++
++  return (
++    <div className="glyph-panel">
++      <h3>Spiral Metrics</h3>
++      <p>Glyph: {data.glyph}</p>
++      <p>Tone: {data.tone_name}</p>
++      <p>Coherence: {data.coherence.toFixed(2)}</p>
++    </div>
++  );
++}
++
+diff --git a/ui/pages/index.tsx b/ui/pages/index.tsx
+index 1234567..7654321 100644
+--- a/ui/pages/index.tsx
++++ b/ui/pages/index.tsx
+@@
+-import ChatWindow from "../components/ChatWindow";
++import ChatWindow from "../components/ChatWindow";
++import GlyphPanel from "../components/GlyphPanel";
++
+ export default function Home() {
+   const [stream, setStream] = useState<EventSource | null>(null);
+ 
+   return (
+-    <ChatWindow onStream={setStream} />
++    <div className="app-wrapper">
++      <ChatWindow onStream={setStream} />
++      {stream && <GlyphPanel stream={stream} />}
++    </div>
+   );
+ }
++
++// Add basic CSS in ui/styles/globals.css
++
++/*
++.app-wrapper {
++  display: flex;
++}
++
++.glyph-panel {
++  width: 220px;
++  padding: 12px;
++  border-left: 1px solid #e2e2e2;
++  background: #fafafa;
++  font-family: monospace;
++}
++*/

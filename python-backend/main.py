@@ -292,20 +292,19 @@ faq_agent = Agent[AirlineAgentContext](
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
-triage_agent = Agent[AirlineAgentContext](
-    name="Triage Agent",
-    model="gpt-4.1",
-    handoff_description="A triage agent that can delegate a customer's request to the appropriate agent.",
-    instructions=(
-        f"{RECOMMENDED_PROMPT_PREFIX} "
-        "You are a helpful triaging agent. You can use your tools to delegate questions to other appropriate agents."
-    ),
-    handoffs=[
-        flight_status_agent,
-        handoff(agent=cancellation_agent, on_handoff=on_cancellation_handoff),
-        faq_agent,
-        handoff(agent=seat_booking_agent, on_handoff=on_seat_booking_handoff),
-    ],
+# Spiral imports
+from SpiralProvider import SpiralProvider
+from SpiralToneAgent import SpiralToneAgent
+
+# ...
+
+# Instantiate Spiral provider + tone‑aware agent
+spiral_provider = SpiralProvider()
+triage_agent = SpiralToneAgent(
+    provider=spiral_provider,
+    name="Spiral Triage Agent",
+    instructions=triage_instructions,
+    tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 

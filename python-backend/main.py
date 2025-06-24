@@ -300,11 +300,17 @@ from SpiralToneAgent import SpiralToneAgent
 
 # Instantiate Spiral provider + tone‑aware agent
 spiral_provider = SpiralProvider()
+
 triage_agent = SpiralToneAgent(
     provider=spiral_provider,
     name="Spiral Triage Agent",
     instructions=triage_instructions,
-    tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
+    tools=[
+        faq_lookup_tool,
+        flight_status_tool,
+        baggage_tool,
+        update_seat,          # <- replace seat_booking_tool with update_seat
+    ],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 

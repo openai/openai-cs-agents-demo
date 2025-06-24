@@ -8,12 +8,7 @@ index 0000000..1111111
 +import requests
 +from agents.providers import BaseProvider, ToolResponse
 +
-+
 +class SpiralProvider(BaseProvider):
-+    """
-+    Wraps the Hugging Face `spiral_core` endpoint and returns glyph / tone / coherence metadata.
-+    """
-+
 +    def __init__(self, endpoint_url: str | None = None, timeout: int = 30):
 +        self.url = endpoint_url or os.getenv("SPIRAL_ENDPOINT")
 +        self.timeout = timeout
@@ -31,7 +26,7 @@ index 0000000..1111111
 +                "coherence": result.get("coherence"),
 +            },
 +        )
-+
+
 diff --git a/python-backend/SpiralToneAgent.py b/python-backend/SpiralToneAgent.py
 new file mode 100644
 index 0000000..2222222
@@ -42,12 +37,7 @@ index 0000000..2222222
 +from agents.agent import Agent
 +from agents.schema import Event
 +
-+
 +class SpiralToneAgent(Agent):
-+    """
-+    Tone‑aware Agent that maintains an EMA coherence score and appends glyph context to every reply.
-+    """
-+
 +    def __init__(self, provider, coherence_alpha: float = 0.8, **kwargs):
 +        super().__init__(provider=provider, **kwargs)
 +        self.coherence_ema = None
@@ -79,34 +69,12 @@ index 0000000..2222222
 +            f"coherence:{self.coherence_ema:.2f}"
 +        )
 +        return decorated
-+
+
 diff --git a/python-backend/main.py b/python-backend/main.py
-index d964468..abcdef0 100644
+index abcdef1..abcdef2 100644
 --- a/python-backend/main.py
 +++ b/python-backend/main.py
 @@
--from agents import (
--    Agent,
--    RunContextWrapper,
--    Runner,
--    TResponseInputItem,
--    function_tool,
--    handoff,
--    GuardrailFunctionOutput,
--    input_guardrail,
--)
-+from agents import (
-+    Agent,
-+    RunContextWrapper,
-+    Runner,
-+    TResponseInputItem,
-+    function_tool,
-+    handoff,
-+    GuardrailFunctionOutput,
-+    input_guardrail,
-+)
-+
-+# Spiral imports
 +from SpiralProvider import SpiralProvider
 +from SpiralToneAgent import SpiralToneAgent
 @@
@@ -117,7 +85,6 @@ index d964468..abcdef0 100644
 -        tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
 -        input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 -    )
-+    # Replace default triage agent with SpiralToneAgent
 +    spiral_provider = SpiralProvider()
 +    triage_agent = SpiralToneAgent(
 +        provider=spiral_provider,
@@ -126,7 +93,7 @@ index d964468..abcdef0 100644
 +        tools=[faq_lookup_tool, flight_status_tool, baggage_tool, seat_booking_tool],
 +        input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 +    )
-+
+
 diff --git a/ui/components/GlyphPanel.tsx b/ui/components/GlyphPanel.tsx
 new file mode 100644
 index 0000000..3333333
@@ -163,14 +130,12 @@ index 0000000..3333333
 +    </div>
 +  );
 +}
-+
+
 diff --git a/ui/pages/index.tsx b/ui/pages/index.tsx
 index 1234567..7654321 100644
 --- a/ui/pages/index.tsx
 +++ b/ui/pages/index.tsx
 @@
--import ChatWindow from "../components/ChatWindow";
-+import ChatWindow from "../components/ChatWindow";
 +import GlyphPanel from "../components/GlyphPanel";
 +
  export default function Home() {
@@ -184,14 +149,12 @@ index 1234567..7654321 100644
 +    </div>
    );
  }
-+
-+// Add basic CSS in ui/styles/globals.css
-+
+
++/* Add this to globals.css for basic layout */
 +/*
 +.app-wrapper {
 +  display: flex;
 +}
-+
 +.glyph-panel {
 +  width: 220px;
 +  padding: 12px;

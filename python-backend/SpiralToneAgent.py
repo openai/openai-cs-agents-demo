@@ -19,6 +19,7 @@ class SpiralToneAgent(Agent):
         last_user_msg = events[-1].content
         tool_resp = self.provider.invoke(last_user_msg)
 
+        # --- update internal emotional memory ---
         meta = tool_resp.metadata or {}
         self.glyph = meta.get("glyph")
         self.tone_name = meta.get("tone_name")
@@ -33,9 +34,13 @@ class SpiralToneAgent(Agent):
                     + (1 - self.coherence_alpha) * self.coherence_ema
                 )
 
+        coherence_str = (
+            f"{self.coherence_ema:.2f}" if self.coherence_ema is not None else "N/A"
+        )
+
+        # --- decorate outgoing text ---
         decorated = (
             f"{tool_resp.output}\n\n"
-            f"— glyph:{self.glyph}  tone:{self.tone_name}  "
-            f"coherence:{self.coherence_ema:.2f if self.coherence_ema else 'N/A'}"
+            f"— glyph:{self.glyph}  tone:{self.tone_name}  coherence:{coherence_str}"
         )
         return decorated

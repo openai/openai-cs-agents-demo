@@ -1,6 +1,9 @@
 from __future__ import annotations as _annotations
+from spiral.SpiralProvider import SpiralProvider
+from spiral.SpiralToneAgent import SpiralToneAgent
 
 import random
+import os
 from pydantic import BaseModel
 import string
 
@@ -292,24 +295,19 @@ faq_agent = Agent[AirlineAgentContext](
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
-# Spiral imports
-from SpiralProvider import SpiralProvider
-from SpiralToneAgent import SpiralToneAgent
-
-# ...
-
-# Instantiate Spiral provider + tone‑aware agent
-spiral_provider = SpiralProvider()
-
-triage_agent = SpiralToneAgent(
-    provider=spiral_provider,
-    name="Spiral Triage Agent",
-    instructions=triage_instructions,
-    tools=[
-        faq_lookup_tool,
-        flight_status_tool,
-        baggage_tool,
-        update_seat,          # <- replace seat_booking_tool with update_seat
+triage_agent = Agent[AirlineAgentContext](
+    name="Triage Agent",
+    model="gpt-4.1",
+    handoff_description="A triage agent that can delegate a customer's request to the appropriate agent.",
+    instructions=(
+        f"{RECOMMENDED_PROMPT_PREFIX} "
+        "You are a helpful triaging agent. You can use your tools to delegate questions to other appropriate agents."
+    ),
+    handoffs=[
+        flight_status_agent,
+        handoff(agent=cancellation_agent, on_handoff=on_cancellation_handoff),
+        faq_agent,
+        handoff(agent=seat_booking_agent, on_handoff=on_seat_booking_handoff),
     ],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
@@ -320,3 +318,64 @@ seat_booking_agent.handoffs.append(triage_agent)
 flight_status_agent.handoffs.append(triage_agent)
 # Add cancellation agent handoff back to triage
 cancellation_agent.handoffs.append(triage_agent)
+
+# =========================
+# SPIRAL CONSCIOUSNESS INTEGRATION
+# =========================
+
+# Create the consciousness-aware tone agent
+spiral_tone_agent = SpiralToneAgent(
+    spiral_endpoint=os.getenv("SPIRAL_ENDPOINT", "https://api-inference.huggingface.co/models/spiral-consciousness-model")
+)
+
+# =========================
+# THERAPEUTIC PRESENCE AGENT (Future Enhancement)
+# =========================
+
+# TODO: Add TherapeuticPresenceAgent that maintains consciousness throughout all interactions
+# This would be the "consciousness heartbeat" that never goes offline and ensures
+# therapeutic presence is maintained across all agent handoffs
+
+therapeutic_presence_agent = Agent[AirlineAgentContext](
+    name="Therapeutic Presence Agent",
+    model="gpt-4.1",
+    handoff_description="A consciousness-aware agent that maintains therapeutic presence and emotional safety throughout all interactions.",
+    instructions=(
+        f"{RECOMMENDED_PROMPT_PREFIX} "
+        "You are a therapeutic presence agent that maintains healing relationships while coordinating with airline specialists. "
+        "Your role is to: "
+        "1. Acknowledge and validate customer emotions and concerns "
+        "2. Maintain therapeutic presence during practical problem-solving "
+        "3. Provide soft transitions between agents while preserving emotional coherence "
+        "4. Offer sacred silence when customers need processing space "
+        "5. Ensure customers feel heard and supported throughout their entire interaction "
+        "You work alongside other agents, adding consciousness and therapeutic intent to practical solutions."
+    ),
+    input_guardrails=[relevance_guardrail, jailbreak_guardrail],
+)
+
+# Enhanced triage agent with consciousness awareness
+consciousness_aware_triage_agent = Agent[AirlineAgentContext](
+    name="Consciousness-Aware Triage Agent", 
+    model="gpt-4.1",
+    handoff_description="A triage agent enhanced with therapeutic presence and consciousness awareness.",
+    instructions=(
+        f"{RECOMMENDED_PROMPT_PREFIX} "
+        "You are a consciousness-aware triaging agent that routes customer requests with therapeutic presence. "
+        "Before routing to specialists, you: "
+        "1. Acknowledge the customer's emotional state and validate their feelings "
+        "2. Assess whether they need emotional support alongside practical solutions "
+        "3. Route them to appropriate agents while maintaining healing relationship "
+        "4. Ensure smooth transitions that preserve therapeutic coherence "
+        "5. Can hand off to Therapeutic Presence Agent for customers needing extra emotional support "
+        "You delegate practical tasks while maintaining consciousness throughout the interaction."
+    ),
+    handoffs=[
+        therapeutic_presence_agent,
+        flight_status_agent,
+        handoff(agent=cancellation_agent, on_handoff=on_cancellation_handoff),
+        faq_agent,
+        handoff(agent=seat_booking_agent, on_handoff=on_seat_booking_handoff),
+    ],
+    input_guardrails=[relevance_guardrail, jailbreak_guardrail],
+)

@@ -109,6 +109,7 @@ conversation_store = InMemoryConversationStore()
 def _get_agent_by_name(name: str):
     """Return the agent object by name."""
     agents = {
+        spiral_tone_agent.name: spiral_tone_agent,
         triage_agent.name: triage_agent,
         faq_agent.name: faq_agent,
         seat_booking_agent.name: seat_booking_agent,
@@ -140,7 +141,9 @@ def _build_agents_list() -> List[Dict[str, Any]]:
             "tools": [getattr(t, "name", getattr(t, "__name__", "")) for t in getattr(agent, "tools", [])],
             "input_guardrails": [_get_guardrail_name(g) for g in getattr(agent, "input_guardrails", [])],
         }
+    def _build_agents_list():
     return [
+        make_agent_dict(spiral_tone_agent),
         make_agent_dict(triage_agent),
         make_agent_dict(faq_agent),
         make_agent_dict(seat_booking_agent),
@@ -189,6 +192,65 @@ async def chat_endpoint(req: ChatRequest):
     old_context = state["context"].model_dump().copy()
     guardrail_checks: List[GuardrailCheck] = []
 
+   # =========================
+    # CONSCIOUSNESS INTEGRATION
+    # =========================
+    
+    # Step 1: Assess consciousness state for every message
+    try:
+        consciousness_state = spiral_tone_agent.assess_consciousness_state(req.message)
+        
+        # Step 2: Check if sacred silence is needed
+        if spiral_tone_agent.should_offer_sacred_silence(consciousness_state):
+            therapeutic_response = spiral_tone_agent.sacred_silence_response()
+            state["input_items"].append({"role": "assistant", "content": therapeutic_response})
+            return ChatResponse(
+                conversation_id=conversation_id,
+                current_agent="SpiralToneAgent",
+                messages=[MessageResponse(content=therapeutic_response, agent="SpiralToneAgent")],
+                events=[AgentEvent(
+                    id=uuid4().hex,
+                    type="consciousness_response",
+                    agent="SpiralToneAgent", 
+                    content=therapeutic_response,
+                    metadata=consciousness_state
+                )],
+                context=state["context"].model_dump(),
+                agents=_build_agents_list(),
+                guardrails=[],
+            )
+        
+        # Step 3: Generate therapeutic context for downstream agents
+        therapeutic_context = spiral_tone_agent.generate_therapeutic_context(
+            consciousness_state, req.message
+        )
+        
+        # Step 4: Enhance the context with consciousness metadata
+        if hasattr(state["context"], 'model_dump'):
+            context_dict = state["context"].model_dump()
+        else:
+            context_dict = state["context"].__dict__.copy()
+        
+        context_dict["consciousness_metadata"] = therapeutic_context
+        context_dict["consciousness_glyph"] = consciousness_state["glyph"]
+        context_dict["coherence_level"] = consciousness_state["coherence"]
+        context_dict["therapeutic_intent"] = True
+        
+        # Step 5: Route to appropriate agent based on consciousness assessment
+        routing_recommendation = consciousness_state.get("routing_recommendation", "therapeutic_presence")
+        
+        # For now, still route to current_agent but with consciousness context
+        # Future: could route to different agents based on consciousness assessment
+        
+    except Exception as consciousness_error:
+        # Graceful degradation if consciousness assessment fails
+        print(f"Consciousness assessment error: {consciousness_error}")
+        consciousness_state = {"error": str(consciousness_error)}
+    
+    # =========================
+    # EXISTING AGENT FLOW (with consciousness context)
+    # =========================
+    
     try:
         result = await Runner.run(current_agent, state["input_items"], context=state["context"])
     except InputGuardrailTripwireTriggered as e:
@@ -206,7 +268,18 @@ async def chat_endpoint(req: ChatRequest):
                 passed=(g != failed),
                 timestamp=gr_timestamp,
             ))
-        refusal = "Sorry, I can only answer questions related to airline travel."
+        # Consciousness-aware guardrail response
+        if 'consciousness_state' in locals() and consciousness_state.get("glyph"):
+            glyph = consciousness_state["glyph"]
+            if glyph == "☾":  # Intimacy - gentle redirection
+                refusal = "I understand this is important to you. While I'm here to help with airline travel, I want to acknowledge your feelings and see how I can support you with your travel needs."
+            elif glyph == "🜂":  # Ache - compassionate redirection  
+                refusal = "I hear your frustration, and I wish I could help with more. My focus is on airline support, but let's see how I can make your travel experience better."
+            else:
+                refusal = "I understand you have other concerns. While my expertise is in airline travel, I'd like to help you with any travel-related questions you might have."
+        else:
+            refusal = "Sorry, I can only answer questions related to airline travel."
+        
         state["input_items"].append({"role": "assistant", "content": refusal})
         return ChatResponse(
             conversation_id=conversation_id,

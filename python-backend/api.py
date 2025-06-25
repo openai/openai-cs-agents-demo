@@ -5,6 +5,12 @@ from typing import Optional, List, Dict, Any
 from uuid import uuid4
 import time
 import logging
+from dotenv import load_dotenv
+
+# Import do logger personalizado
+from llm_logger import llm_logger
+
+load_dotenv()
 
 from main import (
     triage_agent,
@@ -91,12 +97,22 @@ class ConversationStore:
 
 class InMemoryConversationStore(ConversationStore):
     _conversations: Dict[str, Dict[str, Any]] = {}
+    _conversation_start_times: Dict[str, float] = {}
 
     def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         return self._conversations.get(conversation_id)
 
     def save(self, conversation_id: str, state: Dict[str, Any]):
         self._conversations[conversation_id] = state
+        # Registra o tempo de início se for uma nova conversa
+        if conversation_id not in self._conversation_start_times:
+            self._conversation_start_times[conversation_id] = time.time()
+
+    def get_conversation_duration(self, conversation_id: str) -> Optional[float]:
+        """Retorna a duração da conversa em segundos."""
+        if conversation_id in self._conversation_start_times:
+            return time.time() - self._conversation_start_times[conversation_id]
+        return None
 
 # TODO: when deploying this app in scale, switch to your own production-ready implementation
 conversation_store = InMemoryConversationStore()
@@ -168,6 +184,14 @@ async def chat_endpoint(req: ChatRequest):
             "context": ctx,
             "current_agent": current_agent_name,
         }
+        
+        # Log início da conversa
+        llm_logger.log_conversation_start(
+            conversation_id=conversation_id,
+            initial_agent=current_agent_name,
+            context=ctx.model_dump() if ctx else {}
+        )
+        
         if req.message.strip() == "":
             conversation_store.save(conversation_id, state)
             return ChatResponse(
@@ -175,7 +199,7 @@ async def chat_endpoint(req: ChatRequest):
                 current_agent=current_agent_name,
                 messages=[],
                 events=[],
-                context=ctx.model_dump(),
+                context=ctx.model_dump() if ctx else {},
                 agents=_build_agents_list(),
                 guardrails=[],
             )
@@ -185,17 +209,46 @@ async def chat_endpoint(req: ChatRequest):
 
     current_agent = _get_agent_by_name(state["current_agent"])
     state["input_items"].append({"content": req.message, "role": "user"})
-    old_context = state["context"].model_dump().copy()
+    old_context = (state["context"].model_dump() if state["context"] else {}).copy()
     guardrail_checks: List[GuardrailCheck] = []
+
+    # Log da requisição para LLM
+    llm_logger.log_llm_request(
+        agent_name=current_agent.name,
+        model=getattr(current_agent, "model", "unknown"),
+        input_data=req.message,
+        conversation_id=conversation_id,
+        context=state["context"].model_dump() if state["context"] else {}
+    )
 
     try:
         result = await Runner.run(current_agent, state["input_items"], context=state["context"])
+        
+        # Log da resposta da LLM
+        llm_logger.log_llm_response(
+            agent_name=current_agent.name,
+            model=getattr(current_agent, "model", "unknown"),
+            response=result.new_items,
+            conversation_id=conversation_id,
+            metadata={"final_output": str(result.final_output) if hasattr(result, 'final_output') else None}
+        )
+        
     except InputGuardrailTripwireTriggered as e:
         failed = e.guardrail_result.guardrail
         gr_output = e.guardrail_result.output.output_info
         gr_reasoning = getattr(gr_output, "reasoning", "")
         gr_input = req.message
         gr_timestamp = time.time() * 1000
+        
+        # Log do erro de guardrail
+        llm_logger.log_error(
+            agent_name=current_agent.name,
+            error_type="guardrail_tripwire",
+            error_message=f"Guardrail '{_get_guardrail_name(failed)}' triggered",
+            conversation_id=conversation_id,
+            context={"reasoning": gr_reasoning, "input": gr_input}
+        )
+        
         for g in current_agent.input_guardrails:
             guardrail_checks.append(GuardrailCheck(
                 id=uuid4().hex,
@@ -205,6 +258,17 @@ async def chat_endpoint(req: ChatRequest):
                 passed=(g != failed),
                 timestamp=gr_timestamp,
             ))
+            
+            # Log individual de cada guardrail
+            llm_logger.log_guardrail_check(
+                agent_name=current_agent.name,
+                guardrail_name=_get_guardrail_name(g),
+                input_text=gr_input,
+                passed=(g != failed),
+                reasoning=(gr_reasoning if g == failed else ""),
+                conversation_id=conversation_id
+            )
+            
         refusal = "Sorry, I can only answer questions related to airline travel."
         state["input_items"].append({"role": "assistant", "content": refusal})
         return ChatResponse(
@@ -212,7 +276,7 @@ async def chat_endpoint(req: ChatRequest):
             current_agent=current_agent.name,
             messages=[MessageResponse(content=refusal, agent=current_agent.name)],
             events=[],
-            context=state["context"].model_dump(),
+            context=state["context"].model_dump() if state["context"] else {},
             agents=_build_agents_list(),
             guardrails=guardrail_checks,
         )
@@ -225,8 +289,18 @@ async def chat_endpoint(req: ChatRequest):
             text = ItemHelpers.text_message_output(item)
             messages.append(MessageResponse(content=text, agent=item.agent.name))
             events.append(AgentEvent(id=uuid4().hex, type="message", agent=item.agent.name, content=text))
+            
         # Handle handoff output and agent switching
         elif isinstance(item, HandoffOutputItem):
+            # Log da transição de agente
+            llm_logger.log_agent_transition(
+                from_agent=item.source_agent.name,
+                to_agent=item.target_agent.name,
+                reason="handoff_triggered",
+                conversation_id=conversation_id,
+                context=state["context"].model_dump() if state["context"] else {}
+            )
+            
             # Record the handoff event
             events.append(
                 AgentEvent(
@@ -264,6 +338,7 @@ async def chat_endpoint(req: ChatRequest):
                             )
                         )
             current_agent = item.target_agent
+            
         elif isinstance(item, ToolCallItem):
             tool_name = getattr(item.raw_item, "name", None)
             raw_args = getattr(item.raw_item, "arguments", None)
@@ -274,6 +349,15 @@ async def chat_endpoint(req: ChatRequest):
                     tool_args = json.loads(raw_args)
                 except Exception:
                     pass
+                    
+            # Log da chamada de ferramenta
+            llm_logger.log_tool_call(
+                agent_name=item.agent.name,
+                tool_name=tool_name or "unknown",
+                tool_args=tool_args,
+                conversation_id=conversation_id
+            )
+            
             events.append(
                 AgentEvent(
                     id=uuid4().hex,
@@ -291,7 +375,16 @@ async def chat_endpoint(req: ChatRequest):
                         agent=item.agent.name,
                     )
                 )
+                
         elif isinstance(item, ToolCallOutputItem):
+            # Log do resultado da ferramenta
+            llm_logger.log_tool_result(
+                agent_name=item.agent.name,
+                tool_name="unknown",  # Não temos acesso direto ao nome da ferramenta aqui
+                result=item.output,
+                conversation_id=conversation_id
+            )
+            
             events.append(
                 AgentEvent(
                     id=uuid4().hex,
@@ -302,7 +395,7 @@ async def chat_endpoint(req: ChatRequest):
                 )
             )
 
-    new_context = state["context"].dict()
+    new_context = state["context"].dict() if state["context"] else {}
     changes = {k: new_context[k] for k in new_context if old_context.get(k) != new_context[k]}
     if changes:
         events.append(
@@ -327,6 +420,16 @@ async def chat_endpoint(req: ChatRequest):
         if failed:
             final_guardrails.append(failed)
         else:
+            # Log de guardrails que passaram
+            llm_logger.log_guardrail_check(
+                agent_name=current_agent.name,
+                guardrail_name=name,
+                input_text=req.message,
+                passed=True,
+                reasoning="",
+                conversation_id=conversation_id
+            )
+            
             final_guardrails.append(GuardrailCheck(
                 id=uuid4().hex,
                 name=name,
@@ -341,7 +444,60 @@ async def chat_endpoint(req: ChatRequest):
         current_agent=current_agent.name,
         messages=messages,
         events=events,
-        context=state["context"].dict(),
+        context=state["context"].dict() if state["context"] else {},
         agents=_build_agents_list(),
         guardrails=final_guardrails,
     )
+
+@app.get("/logs")
+async def get_logs(limit: int = 100):
+    """
+    Endpoint para visualizar os logs da aplicação.
+    Retorna as últimas entradas do arquivo llm.log
+    """
+    try:
+        with open("llm.log", "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            # Retorna as últimas 'limit' linhas
+            recent_logs = lines[-limit:] if len(lines) > limit else lines
+            return {
+                "logs": recent_logs,
+                "total_lines": len(lines),
+                "showing_last": len(recent_logs)
+            }
+    except FileNotFoundError:
+        return {
+            "logs": [],
+            "total_lines": 0,
+            "showing_last": 0,
+            "message": "Arquivo de log não encontrado"
+        }
+    except Exception as e:
+        return {
+            "logs": [],
+            "total_lines": 0,
+            "showing_last": 0,
+            "error": str(e)
+        }
+
+@app.get("/logs/download")
+async def download_logs():
+    """
+    Endpoint para baixar o arquivo de log completo
+    """
+    try:
+        with open("llm.log", "r", encoding="utf-8") as f:
+            content = f.read()
+            return {
+                "content": content,
+                "filename": "llm.log",
+                "size": len(content)
+            }
+    except FileNotFoundError:
+        return {
+            "error": "Arquivo de log não encontrado"
+        }
+    except Exception as e:
+        return {
+            "error": str(e)
+        }

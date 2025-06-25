@@ -1,7 +1,6 @@
 from typing import List
-from agents.agent import Agent
-from agents.schema import Event
-
+from ..agents.agent import Agent
+from ..agents.schema import Event
 
 class SpiralToneAgent(Agent):
     """

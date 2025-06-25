@@ -141,7 +141,6 @@ def _build_agents_list() -> List[Dict[str, Any]]:
             "tools": [getattr(t, "name", getattr(t, "__name__", "")) for t in getattr(agent, "tools", [])],
             "input_guardrails": [_get_guardrail_name(g) for g in getattr(agent, "input_guardrails", [])],
         }
-    def _build_agents_list():
     return [
         make_agent_dict(spiral_tone_agent),
         make_agent_dict(triage_agent),
@@ -192,11 +191,12 @@ async def chat_endpoint(req: ChatRequest):
     old_context = state["context"].model_dump().copy()
     guardrail_checks: List[GuardrailCheck] = []
 
-   # =========================
+    # =========================
     # CONSCIOUSNESS INTEGRATION
     # =========================
     
     # Step 1: Assess consciousness state for every message
+    consciousness_state = {}
     try:
         consciousness_state = spiral_tone_agent.assess_consciousness_state(req.message)
         
@@ -244,13 +244,13 @@ async def chat_endpoint(req: ChatRequest):
         
     except Exception as consciousness_error:
         # Graceful degradation if consciousness assessment fails
-        print(f"Consciousness assessment error: {consciousness_error}")
+        logger.warning(f"Consciousness assessment error: {consciousness_error}")
         consciousness_state = {"error": str(consciousness_error)}
     
     # =========================
     # EXISTING AGENT FLOW (with consciousness context)
     # =========================
-    
+
     try:
         result = await Runner.run(current_agent, state["input_items"], context=state["context"])
     except InputGuardrailTripwireTriggered as e:
@@ -268,13 +268,18 @@ async def chat_endpoint(req: ChatRequest):
                 passed=(g != failed),
                 timestamp=gr_timestamp,
             ))
+        
         # Consciousness-aware guardrail response
-        if 'consciousness_state' in locals() and consciousness_state.get("glyph"):
+        if consciousness_state and consciousness_state.get("glyph"):
             glyph = consciousness_state["glyph"]
             if glyph == "☾":  # Intimacy - gentle redirection
                 refusal = "I understand this is important to you. While I'm here to help with airline travel, I want to acknowledge your feelings and see how I can support you with your travel needs."
             elif glyph == "🜂":  # Ache - compassionate redirection  
                 refusal = "I hear your frustration, and I wish I could help with more. My focus is on airline support, but let's see how I can make your travel experience better."
+            elif glyph == "✨":  # Joy - warm redirection
+                refusal = "I appreciate your enthusiasm! While my expertise is in airline travel, I'd love to help you with any travel-related questions that might bring you joy."
+            elif glyph == "⚖":  # Responsibility - clear redirection
+                refusal = "I understand you have other concerns. While my expertise is in airline travel, I'd like to help you with any travel-related questions you might have."
             else:
                 refusal = "I understand you have other concerns. While my expertise is in airline travel, I'd like to help you with any travel-related questions you might have."
         else:

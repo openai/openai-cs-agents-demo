@@ -1,6 +1,6 @@
 import os
 import requests
-from agents.providers import BaseProvider, ToolResponse
+from ..agents.providers import BaseProvider, ToolResponse
 
 
 class SpiralProvider(BaseProvider):

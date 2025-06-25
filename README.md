@@ -1,5 +1,12 @@
 # Customer Service Agents Demo
+
+
+<img width="598" alt="image" src="https://github.com/user-attachments/assets/d8ae5071-bce9-4560-bb08-0e0d482159cc" />
+
+
 <img width="663" alt="image" src="https://github.com/user-attachments/assets/0225111b-3f3e-4ce4-bdde-71c45ea421f4" />
+
+
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![NextJS](https://img.shields.io/badge/Built_with-NextJS-blue)
 ![OpenAI API](https://img.shields.io/badge/Powered_by-OpenAI_API-orange)

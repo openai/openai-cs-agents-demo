@@ -36,13 +36,32 @@ cd python-backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp env.example .env
 ```
+
+Or use the `uv` command to install the dependencies:
+```
+cd python-backend 
+pip install uv
+uv venv -p python3.10
+source .venv/bin/activate
+uv pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+cp env.example .env
+```
+
 
 For the UI, you can run:
 
 ```bash
 cd ui
 npm install
+```
+
+Or
+```bash
+bash scripts/install_node.sh
+cd ui
+cnpm install
 ```
 
 ### Run the app
@@ -65,6 +84,8 @@ From the `ui` folder, run:
 
 ```bash
 npm run dev
+# or cnpm
+cnpm run dev
 ```
 
 The frontend will be available at: [http://localhost:3000](http://localhost:3000)

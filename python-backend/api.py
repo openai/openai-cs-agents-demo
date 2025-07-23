@@ -13,10 +13,12 @@ from main import (
     flight_status_agent,
     cancellation_agent,
     create_initial_context,
+    CUSTOM_MODEL_PROVIDER
 )
 
 from agents import (
     Runner,
+    RunConfig,
     ItemHelpers,
     MessageOutputItem,
     HandoffOutputItem,
@@ -25,6 +27,7 @@ from agents import (
     InputGuardrailTripwireTriggered,
     Handoff,
 )
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -189,7 +192,10 @@ async def chat_endpoint(req: ChatRequest):
     guardrail_checks: List[GuardrailCheck] = []
 
     try:
-        result = await Runner.run(current_agent, state["input_items"], context=state["context"])
+        result = await Runner.run(current_agent, state["input_items"], 
+        context=state["context"],
+        run_config=RunConfig(model_provider=CUSTOM_MODEL_PROVIDER)) # 使用自定义Provider
+
     except InputGuardrailTripwireTriggered as e:
         failed = e.guardrail_result.guardrail
         gr_output = e.guardrail_result.output.output_info
@@ -335,7 +341,7 @@ async def chat_endpoint(req: ChatRequest):
                 passed=True,
                 timestamp=time.time() * 1000,
             ))
-
+    print("messagesmessagesmessages",messages)
     return ChatResponse(
         conversation_id=conversation_id,
         current_agent=current_agent.name,

@@ -78,8 +78,13 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
                 }`}
             >
               {msg.role === "user" ? (
-                <div className="ml-4 rounded-[16px] rounded-br-[4px] px-4 py-2 md:ml-24 bg-black text-white font-light max-w-[80%]">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <div className="relative ml-4 md:ml-24">
+                  <div className="rounded-[16px] rounded-br-[4px] px-4 py-2 bg-black text-white font-light max-w-[80%]">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                  <span className="absolute -bottom-4 right-0 text-xs text-gray-400">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
               ) : (
                 <div className="mr-4 rounded-[16px] rounded-bl-[4px] px-4 py-2 md:mr-24 text-zinc-900 bg-[#ECECF1] font-light max-w-[80%]">
@@ -113,7 +118,7 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
           <div className="flex w-full items-center pb-4 md:pb-1">
             <div className="flex w-full flex-col gap-1.5 rounded-2xl p-2.5 pl-1.5 bg-white border border-stone-200 shadow-sm transition-colors">
               <div className="flex items-end gap-1.5 md:gap-2 pl-4">
-                <div className="flex min-w-0 flex-1 flex-col">
+                <div className="flex min-w-0 flex-1 flex-col relative">
                   <textarea
                     id="prompt-textarea"
                     tabIndex={0}
@@ -127,27 +132,28 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
                     onCompositionStart={() => setIsComposing(true)}
                     onCompositionEnd={() => setIsComposing(false)}
                   />
+                  <span className={`absolute bottom-1 right-2 text-xs text-gray-400`}>
+                  Character Count: {inputText.length}
+                  </span>
                 </div>
+                {/* Enhanced send button with loading indicator */}
                 <button
-                  disabled={!inputText.trim()}
-                  className="flex h-8 w-8 items-end justify-center rounded-full bg-black text-white hover:opacity-70 disabled:bg-gray-300 disabled:text-gray-400 transition-colors focus:outline-none"
+                  disabled={!inputText.trim() || isLoading}
+                  className={`flex h-8 w-8 items-end justify-center rounded-full ${
+                    isLoading 
+                    ? "bg-gray-300 animate-pulse" 
+                    : "bg-black hover:opacity-70"
+                  } text-white disabled:bg-gray-300 disabled:text-gray-400 transition-colors focus:outline-none`}
                   onClick={handleSend}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="32"
-                    height="32"
-                    fill="none"
-                    viewBox="0 0 32 32"
-                    className="icon-2xl"
-                  >
-                    <path
-                      fill="currentColor"
-                      fillRule="evenodd"
-                      d="M15.192 8.906a1.143 1.143 0 0 1 1.616 0l5.143 5.143a1.143 1.143 0 0 1-1.616 1.616l-3.192-3.192v9.813a1.143 1.143 0 0 1-2.286 0v-9.813l-3.192 3.192a1.143 1.143 0 1 1-1.616-1.616z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  {isLoading ? (
+                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mb-2" />
+                    
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" viewBox="0 0 32 32">
+                      <path fill="currentColor" fillRule="evenodd" d="M15.192 8.906a1.143 1.143 0 0 1 1.616 0l5.143 5.143a1.143 1.143 0 0 1-1.616 1.616l-3.192-3.192v9.813a1.143 1.143 0 0 1-2.286 0v-9.813l-3.192 3.192a1.143 1.143 0 1 1-1.616-1.616z" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>

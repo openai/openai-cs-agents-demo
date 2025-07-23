@@ -39,11 +39,11 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
             case 'occupied':
                 return 'bg-gray-300 text-gray-500 cursor-not-allowed';
             case 'selected':
-                return 'bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700';
+                return 'bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700 transform hover:scale-105 transition-all';
             case 'available':
                 return isExit
-                    ? 'bg-yellow-100 hover:bg-yellow-200 cursor-pointer border-yellow-300'
-                    : 'bg-emerald-100 hover:bg-emerald-200 cursor-pointer border-emerald-300';
+                    ? 'bg-yellow-100 hover:bg-yellow-200 cursor-pointer border-yellow-300 hover:shadow-md transition-all'
+                    : 'bg-emerald-100 hover:bg-emerald-200 cursor-pointer border-emerald-300 hover:shadow-md transition-all';
             default:
                 return 'bg-emerald-100';
         }
@@ -137,4 +137,4 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
             </CardContent>
         </Card>
     );
-} 
+}

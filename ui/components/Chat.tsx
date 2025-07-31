@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import type { Message } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
 import { SeatMap } from "./seat-map";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 
 interface ChatProps {
   messages: Message[];
@@ -61,8 +63,8 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
   );
 
   return (
-    <div className="flex flex-col h-full flex-1 bg-white shadow-sm border border-gray-200 border-t-0 rounded-xl">
-      <div className="bg-blue-600 text-white h-12 px-4 flex items-center rounded-t-xl">
+    <div className="flex flex-col h-full flex-1 bg-card text-card-foreground shadow-sm border border-border border-t-0 rounded-xl">
+      <div className="bg-primary text-primary-foreground h-12 px-4 flex items-center rounded-t-xl">
         <h2 className="font-semibold text-sm sm:text-base lg:text-lg">
           Customer View
         </h2>
@@ -78,11 +80,11 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
                 }`}
             >
               {msg.role === "user" ? (
-                <div className="ml-4 rounded-[16px] rounded-br-[4px] px-4 py-2 md:ml-24 bg-black text-white font-light max-w-[80%]">
+                <div className="ml-4 rounded-[16px] rounded-br-[4px] px-4 py-2 md:ml-24 bg-primary text-primary-foreground font-light max-w-[80%]">
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
               ) : (
-                <div className="mr-4 rounded-[16px] rounded-bl-[4px] px-4 py-2 md:mr-24 text-zinc-900 bg-[#ECECF1] font-light max-w-[80%]">
+                <div className="mr-4 rounded-[16px] rounded-bl-[4px] px-4 py-2 md:mr-24 bg-muted text-foreground font-light max-w-[80%]">
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
               )}
@@ -101,7 +103,7 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
         )}
         {isLoading && (
           <div className="flex mb-5 text-sm justify-start">
-            <div className="h-3 w-3 bg-black rounded-full animate-pulse" />
+            <div className="h-3 w-3 bg-primary rounded-full animate-pulse" />
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -111,16 +113,16 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
       <div className="p-2 md:px-4">
         <div className="flex items-center">
           <div className="flex w-full items-center pb-4 md:pb-1">
-            <div className="flex w-full flex-col gap-1.5 rounded-2xl p-2.5 pl-1.5 bg-white border border-stone-200 shadow-sm transition-colors">
+            <div className="flex w-full flex-col gap-1.5 rounded-2xl p-2.5 pl-1.5 bg-background border border-input shadow-sm transition-colors">
               <div className="flex items-end gap-1.5 md:gap-2 pl-4">
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <textarea
+                  <Textarea
                     id="prompt-textarea"
                     tabIndex={0}
                     dir="auto"
                     rows={2}
                     placeholder="Message..."
-                    className="mb-2 resize-none border-0 focus:outline-none text-sm bg-transparent px-0 pb-6 pt-2"
+                    className="mb-2 resize-none bg-transparent px-0 pb-6 pt-2 border-0 focus-visible:ring-0"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -128,18 +130,18 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
                     onCompositionEnd={() => setIsComposing(false)}
                   />
                 </div>
-                <button
+                <Button
                   disabled={!inputText.trim()}
-                  className="flex h-8 w-8 items-end justify-center rounded-full bg-black text-white hover:opacity-70 disabled:bg-gray-300 disabled:text-gray-400 transition-colors focus:outline-none"
+                  size="icon"
                   onClick={handleSend}
+                  aria-label="Send message"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    width="32"
-                    height="32"
+                    width="20"
+                    height="20"
                     fill="none"
                     viewBox="0 0 32 32"
-                    className="icon-2xl"
                   >
                     <path
                       fill="currentColor"
@@ -148,7 +150,7 @@ export function Chat({ messages, onSendMessage, isLoading }: ChatProps) {
                       clipRule="evenodd"
                     />
                   </svg>
-                </button>
+                </Button>
               </div>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AgentPanel } from "@/components/agent-panel";
-import { Chat } from "@/components/chat";
+import { Chat } from "@/components/Chat";
 import type { Agent, AgentEvent, GuardrailCheck, Message } from "@/lib/types";
 import { callChatAPI } from "@/lib/api";
 
@@ -58,7 +58,6 @@ export default function Home() {
     setIsLoading(true);
 
     const data = await callChatAPI(content, conversationId ?? "");
-
     if (!conversationId) setConversationId(data.conversation_id);
     setCurrentAgent(data.current_agent);
     setContext(data.context);
@@ -88,7 +87,7 @@ export default function Home() {
   };
 
   return (
-    <main className="flex h-screen gap-2 bg-gray-100 p-2">
+    <main className="flex h-screen gap-2 bg-background p-2">
       <AgentPanel
         agents={agents}
         currentAgent={currentAgent}

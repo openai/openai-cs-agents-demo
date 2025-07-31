@@ -39,17 +39,17 @@ function EventIcon({ type }: { type: string }) {
 function EventDetails({ event }: { event: AgentEvent }) {
   let details = null;
   const className =
-    "border border-gray-100 text-xs p-2.5 rounded-md flex flex-col gap-2";
+    "border border-border text-xs p-2.5 rounded-md flex flex-col gap-2 bg-card";
   switch (event.type) {
     case "handoff":
       details = event.metadata && (
         <div className={className}>
-          <div className="text-gray-600">
-            <span className="text-zinc-600 font-medium">From:</span>{" "}
+          <div className="text-muted-foreground">
+            <span className="text-foreground font-medium">From:</span>{" "}
             {event.metadata.source_agent}
           </div>
-          <div className="text-gray-600">
-            <span className="text-zinc-600 font-medium">To:</span>{" "}
+          <div className="text-muted-foreground">
+            <span className="text-foreground font-medium">To:</span>{" "}
             {event.metadata.target_agent}
           </div>
         </div>
@@ -58,10 +58,10 @@ function EventDetails({ event }: { event: AgentEvent }) {
     case "tool_call":
       details = event.metadata && event.metadata.tool_args && (
         <div className={className}>
-          <div className="text-xs text-zinc-600 mb-1 font-medium">
+          <div className="text-xs text-muted-foreground mb-1 font-medium">
             Arguments
           </div>
-          <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto">
+          <pre className="text-xs text-muted-foreground bg-muted p-2 rounded overflow-x-auto">
             {JSON.stringify(event.metadata.tool_args, null, 2)}
           </pre>
         </div>
@@ -70,8 +70,8 @@ function EventDetails({ event }: { event: AgentEvent }) {
     case "tool_output":
       details = event.metadata && event.metadata.tool_result && (
         <div className={className}>
-          <div className="text-xs text-zinc-600 mb-1 font-medium">Result</div>
-          <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto">
+          <div className="text-xs text-muted-foreground mb-1 font-medium">Result</div>
+          <pre className="text-xs text-muted-foreground bg-muted p-2 rounded overflow-x-auto">
             {JSON.stringify(event.metadata.tool_result, null, 2)}
           </pre>
         </div>
@@ -82,8 +82,8 @@ function EventDetails({ event }: { event: AgentEvent }) {
         <div className={className}>
           {Object.entries(event.metadata.changes).map(([key, value]) => (
             <div key={key} className="text-xs">
-              <div className="text-gray-600">
-                <span className="text-zinc-600 font-medium">{key}:</span>{" "}
+              <div className="text-muted-foreground">
+                <span className="text-foreground font-medium">{key}:</span>{" "}
                 {value ?? "null"}
               </div>
             </div>
@@ -98,7 +98,7 @@ function EventDetails({ event }: { event: AgentEvent }) {
   return (
     <div className="mt-1 text-sm">
       {event.content && (
-        <div className="text-gray-700 font-mono mb-2">{event.content}</div>
+        <div className="text-foreground font-mono mb-2">{event.content}</div>
       )}
       {details}
     </div>
@@ -128,30 +128,30 @@ function TimeBadge({ timestamp }: { timestamp: Date }) {
 export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
   return (
     <div className="flex-1 overflow-hidden">
-      <PanelSection title="Runner Output" icon={<MessageSquareMore className="h-4 w-4 text-blue-600" />}>
-        <ScrollArea className="h-[calc(100%-2rem)] rounded-md border border-gray-200 bg-gray-100 shadow-sm">
+      <PanelSection title="Runner Output" icon={<MessageSquareMore className="h-4 w-4 text-primary" />}>
+        <ScrollArea className="h-[calc(100%-2rem)] rounded-md border border-border bg-muted shadow-sm">
         <div className="p-4 space-y-3">
           {runnerEvents.length === 0 ? (
-            <p className="text-center text-zinc-500 p-4">
+            <p className="text-center text-muted-foreground p-4">
               No runner events yet
             </p>
           ) : (
             runnerEvents.map((event) => (
               <Card
                 key={event.id}
-                className="border border-gray-200 bg-white shadow-sm rounded-lg"
+                className="border border-border bg-card shadow-sm rounded-lg"
               >
                 <CardHeader className="flex flex-row justify-between items-center p-4">
-                  <span className="font-medium text-gray-800 text-sm">
+                  <span className="font-medium text-foreground text-sm">
                     {event.agent}
                   </span>
                   <TimeBadge timestamp={event.timestamp} />
                 </CardHeader>
 
                 <CardContent className="flex items-start gap-3 p-4">
-                  <div className="rounded-full p-2 bg-gray-100 flex items-center gap-2">
+                  <div className="rounded-full p-2 bg-muted flex items-center gap-2">
                     <EventIcon type={event.type} />
-                    <div className="text-xs text-gray-600">
+                    <div className="text-xs text-muted-foreground">
                       {formatEventName(event.type)}
                     </div>
                   </div>

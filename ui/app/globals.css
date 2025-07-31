@@ -39,14 +39,15 @@
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222.2 47.4% 11.2%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 222.2 47.4% 11.2%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 330 100% 44%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    /* Traditional dark: blue accent */
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 40% 98%;
 
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -62,8 +63,23 @@
 
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 330 100% 44%;
+    --ring: 217 91% 60%;
   }
+
+  /* Accent colorways (apply to both light and dark) */
+  .palette-blue {
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 40% 98%;
+    --ring: 217 91% 60%;
+  }
+
+  /* Additional colorways that override only accent hues (work in light or dark) */
+  .palette-slate {
+    --primary: 215 16% 47%;
+    --primary-foreground: 210 40% 98%;
+    --ring: 215 16% 47%;
+  }
+
 }
 
 @layer base {

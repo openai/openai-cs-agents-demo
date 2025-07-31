@@ -1,6 +1,5 @@
 "use client";
-import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface PanelSectionProps {
   title: string;
@@ -9,27 +8,23 @@ interface PanelSectionProps {
 }
 
 export function PanelSection({ title, icon, children }: PanelSectionProps) {
-  const [show, setShow] = useState(true);
-
   return (
     <div className="mb-5">
-      <h2
-        className="text-lg font-semibold mb-3 text-zinc-900 flex items-center justify-between cursor-pointer"
-        onClick={() => setShow(!show)}
-      >
-        <div className="flex items-center">
-          <span className="bg-blue-600 bg-opacity-10 p-1.5 rounded-md mr-2 shadow-sm">
-            {icon}
-          </span>
-          <span>{title}</span>
-        </div>
-        {show ? (
-          <ChevronDown className="h-4 w-4 text-zinc-900" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-zinc-900" />
-        )}
-      </h2>
-      {show && children}
+      <Accordion type="single" collapsible defaultValue="item">
+        <AccordionItem value="item" className="border-none">
+          <AccordionTrigger className="px-2 rounded-md bg-primary/10 text-foreground">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-md bg-primary/20 text-primary-foreground/90">
+                {icon}
+              </span>
+              <span className="text-base font-semibold">{title}</span>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="pt-2">
+            {children}
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </div>
   );
 }

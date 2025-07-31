@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface SeatMapProps {
     onSeatSelect: (seatNumber: string) => void;
@@ -33,19 +34,18 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
         return 'available';
     };
 
-    const getSeatColor = (status: string, isExit: boolean) => {
-        // Available = emerald, Occupied = gray, Exit Row = yellow (pastel)
+    const getSeatClasses = (status: string, isExit: boolean) => {
         switch (status) {
             case 'occupied':
-                return 'bg-gray-300 text-gray-500 cursor-not-allowed';
+                return 'cursor-not-allowed opacity-60 bg-muted text-muted-foreground border-border';
             case 'selected':
-                return 'bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700';
+                return 'bg-primary text-primary-foreground hover:bg-primary/90';
             case 'available':
                 return isExit
-                    ? 'bg-yellow-100 hover:bg-yellow-200 cursor-pointer border-yellow-300'
-                    : 'bg-emerald-100 hover:bg-emerald-200 cursor-pointer border-emerald-300';
+                    ? 'bg-accent hover:bg-accent/80 border-ring'
+                    : 'bg-accent hover:bg-accent/80 border-border';
             default:
-                return 'bg-emerald-100';
+                return 'bg-accent';
         }
     };
 
@@ -63,15 +63,16 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
                                     const seatNumber = `${row}${letter}`;
                                     const status = getSeatStatus(seatNumber);
                                     return (
-                                        <button
+                                        <Button
+                                            variant="outline"
                                             key={seatNumber}
-                                            className={`w-8 h-8 text-xs font-medium border rounded ${getSeatColor(status, isExitRow)} transition-colors`}
+                                            className={`w-8 h-8 text-xs font-medium rounded ${getSeatClasses(status, isExitRow)} transition-colors`}
                                             onClick={() => status === 'available' && onSeatSelect(seatNumber)}
                                             disabled={status === 'occupied'}
                                             title={`Seat ${seatNumber}${isExitRow ? ' (Exit Row)' : ''}${status === 'occupied' ? ' - Occupied' : ''}`}
                                         >
                                             {letter}
-                                        </button>
+                                        </Button>
                                     );
                                 })}
                             </div>
@@ -81,15 +82,16 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
                                     const seatNumber = `${row}${letter}`;
                                     const status = getSeatStatus(seatNumber);
                                     return (
-                                        <button
+                                        <Button
+                                            variant="outline"
                                             key={seatNumber}
-                                            className={`w-8 h-8 text-xs font-medium border rounded ${getSeatColor(status, isExitRow)} transition-colors`}
+                                            className={`w-8 h-8 text-xs font-medium rounded ${getSeatClasses(status, isExitRow)} transition-colors`}
                                             onClick={() => status === 'available' && onSeatSelect(seatNumber)}
                                             disabled={status === 'occupied'}
                                             title={`Seat ${seatNumber}${isExitRow ? ' (Exit Row)' : ''}${status === 'occupied' ? ' - Occupied' : ''}`}
                                         >
                                             {letter}
-                                        </button>
+                                        </Button>
                                     );
                                 })}
                             </div>
@@ -101,21 +103,21 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
     );
 
     return (
-        <Card className="w-full max-w-md mx-auto my-4 bg-blue-50">
+        <Card className="w-full max-w-md mx-auto my-4 bg-card">
             <CardContent className="p-4">
                 <div className="text-center mb-4">
                     <h3 className="font-semibold text-lg mb-2">Select Your Seat</h3>
                     <div className="flex justify-center gap-4 text-xs">
                         <div className="flex items-center gap-1">
-                            <div className="w-3 h-3 bg-emerald-100 border border-emerald-300 rounded"></div>
+                            <div className="w-3 h-3 bg-accent border border-border rounded"></div>
                             <span>Available</span>
                         </div>
                         <div className="flex items-center gap-1">
-                            <div className="w-3 h-3 bg-gray-300 rounded"></div>
+                            <div className="w-3 h-3 bg-muted rounded"></div>
                             <span>Occupied</span>
                         </div>
                         <div className="flex items-center gap-1">
-                            <div className="w-3 h-3 bg-yellow-100 border border-yellow-300 rounded"></div>
+                            <div className="w-3 h-3 bg-accent border border-ring rounded"></div>
                             <span>Exit Row</span>
                         </div>
                     </div>
@@ -128,8 +130,8 @@ export function SeatMap({ onSeatSelect, selectedSeat }: SeatMapProps) {
                 </div>
 
                 {selectedSeat && (
-                    <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-                        <p className="text-sm font-medium text-blue-800">
+                    <div className="mt-4 p-3 bg-muted rounded-lg text-center">
+                        <p className="text-sm font-medium text-foreground">
                             Selected: Seat {selectedSeat}
                         </p>
                     </div>

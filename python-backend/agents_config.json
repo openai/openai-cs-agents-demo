@@ -1,0 +1,120 @@
+{
+  "primary_agent_name": "Triage Agent",
+  "agents": [
+    {
+      "name": "Triage",
+      "description": "A triage agent that can delegate a customer's request to the appropriate agent.",
+      "model": "gpt-4.1",
+      "instructions": {
+        "mode": "custom",
+        "value": "You are a helpful triaging agent. You can use your tools to delegate questions to other appropriate agents."
+      },
+      "tools": [],
+      "input_guardrails": [
+        "relevance_guardrail",
+        "jailbreak_guardrail"
+      ],
+      "handoffs": [
+        {
+          "target": "Flight Status Agent"
+        },
+        {
+          "target": "Cancellation Agent",
+          "on_handoff": "on_cancellation_handoff"
+        },
+        {
+          "target": "FAQ Agent"
+        },
+        {
+          "target": "Seat Booking Agent",
+          "on_handoff": "on_seat_booking_handoff"
+        }
+      ]
+    },
+    {
+      "name": "Claims Status",
+      "description": "An agent to provide flight status information.",
+      "model": "gpt-4.1",
+      "instructions": {
+        "mode": "builtin",
+        "builtin": "flight_status_instructions"
+      },
+      "tools": [
+        "flight_status_tool"
+      ],
+      "input_guardrails": [
+        "relevance_guardrail",
+        "jailbreak_guardrail"
+      ],
+      "handoffs": [
+        {
+          "target": "Triage Agent"
+        }
+      ]
+    },
+    {
+      "name": "Cancellation Agent",
+      "description": "An agent to cancel flights.",
+      "model": "gpt-4.1",
+      "instructions": {
+        "mode": "builtin",
+        "builtin": "cancellation_instructions"
+      },
+      "tools": [
+        "cancel_flight"
+      ],
+      "input_guardrails": [
+        "relevance_guardrail",
+        "jailbreak_guardrail"
+      ],
+      "handoffs": [
+        {
+          "target": "Triage Agent"
+        }
+      ]
+    },
+    {
+      "name": "FAQ Agent",
+      "description": "A helpful agent that can answer questions about the airline.",
+      "model": "gpt-4.1",
+      "instructions": {
+        "mode": "custom",
+        "value": "You are an FAQ agent. Use your faq_lookup_tool to answer the customer's last question."
+      },
+      "tools": [
+        "faq_lookup_tool"
+      ],
+      "input_guardrails": [
+        "relevance_guardrail",
+        "jailbreak_guardrail"
+      ],
+      "handoffs": [
+        {
+          "target": "Triage Agent"
+        }
+      ]
+    },
+    {
+      "name": "Seat Booking Agent",
+      "description": "A helpful agent that can update a seat on a flight.",
+      "model": "gpt-4.1",
+      "instructions": {
+        "mode": "builtin",
+        "builtin": "seat_booking_instructions"
+      },
+      "tools": [
+        "update_seat",
+        "display_seat_map"
+      ],
+      "input_guardrails": [
+        "relevance_guardrail",
+        "jailbreak_guardrail"
+      ],
+      "handoffs": [
+        {
+          "target": "Triage Agent"
+        }
+      ]
+    }
+  ]
+}

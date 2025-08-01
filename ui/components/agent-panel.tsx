@@ -1,6 +1,8 @@
 "use client";
 
 import { Bot } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { ThemePicker } from "@/components/theme-picker";
 import type { Agent, AgentEvent, GuardrailCheck } from "@/lib/types";
 import { AgentsList } from "./agents-list";
@@ -38,6 +40,9 @@ export function AgentPanel({
         <Bot className="h-5 w-5" />
         <h1 className="font-semibold text-sm sm:text-base lg:text-lg">Agent View</h1>
         <div className="ml-auto flex items-center gap-3">
+          <Link href="/manage" className="hidden sm:block">
+            <Button size="sm" variant="secondary">Manage</Button>
+          </Link>
           <ThemePicker />
           <span className="text-xs font-light tracking-wide opacity-80">
             Airline&nbsp;Co.

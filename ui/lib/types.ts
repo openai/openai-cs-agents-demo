@@ -44,3 +44,19 @@ export interface GuardrailCheck {
   timestamp: Date
 }
 
+// Agents config types for UI editor
+export interface AgentConfig {
+  name: string
+  description: string
+  model: string
+  instructions: { mode: "builtin"; builtin: string } | { mode: "custom"; value: string }
+  tools: string[]
+  input_guardrails: string[]
+  handoffs: { target: string; on_handoff?: string }[]
+}
+
+export interface RegistryConfig {
+  primary_agent_name: string
+  agents: AgentConfig[]
+}
+

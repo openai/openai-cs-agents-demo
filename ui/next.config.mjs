@@ -8,6 +8,14 @@ const nextConfig = {
         source: "/chat",
         destination: "http://127.0.0.1:8000/chat",
       },
+      {
+        source: "/agents-config",
+        destination: "http://127.0.0.1:8000/agents-config",
+      },
+      {
+        source: "/agents-config/:path*",
+        destination: "http://127.0.0.1:8000/agents-config/:path*",
+      },
     ];
   },
 };

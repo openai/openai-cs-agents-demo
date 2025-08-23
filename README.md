@@ -27,6 +27,12 @@ You can also follow [these instructions](https://platform.openai.com/docs/librar
 
 Alternatively, you can set the `OPENAI_API_KEY` environment variable in an `.env` file at the root of the `python-backend` folder. You will need to install the `python-dotenv` package to load the environment variables from the `.env` file.
 
+```bash
+from dotenv import load_dotenv
+
+load_dotenv()
+```
+
 ### Install dependencies
 
 Install the dependencies for the backend by running the following commands:

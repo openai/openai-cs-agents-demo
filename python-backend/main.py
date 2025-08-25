@@ -4,6 +4,9 @@ import random
 from pydantic import BaseModel
 import string
 
+# Import do logger personalizado
+from llm_logger import llm_logger
+
 from agents import (
     Agent,
     RunContextWrapper,
@@ -47,32 +50,69 @@ def create_initial_context() -> AirlineAgentContext:
 )
 async def faq_lookup_tool(question: str) -> str:
     """Lookup answers to frequently asked questions."""
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="FAQ Agent",
+        tool_name="faq_lookup_tool",
+        tool_args={"question": question},
+        conversation_id=None  # Será preenchido pelo contexto da conversa
+    )
+    
     q = question.lower()
     if "bag" in q or "baggage" in q:
-        return (
+        result = (
             "You are allowed to bring one bag on the plane. "
             "It must be under 50 pounds and 22 inches x 14 inches x 9 inches."
         )
     elif "seats" in q or "plane" in q:
-        return (
+        result = (
             "There are 120 seats on the plane. "
             "There are 22 business class seats and 98 economy seats. "
             "Exit rows are rows 4 and 16. "
             "Rows 5-8 are Economy Plus, with extra legroom."
         )
     elif "wifi" in q:
-        return "We have free wifi on the plane, join Airline-Wifi"
-    return "I'm sorry, I don't know the answer to that question."
+        result = "We have free wifi on the plane, join Airline-Wifi"
+    else:
+        result = "I'm sorry, I don't know the answer to that question."
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="FAQ Agent",
+        tool_name="faq_lookup_tool",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 @function_tool
 async def update_seat(
     context: RunContextWrapper[AirlineAgentContext], confirmation_number: str, new_seat: str
 ) -> str:
     """Update the seat for a given confirmation number."""
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="Seat Booking Agent",
+        tool_name="update_seat",
+        tool_args={"confirmation_number": confirmation_number, "new_seat": new_seat},
+        conversation_id=None
+    )
+    
     context.context.confirmation_number = confirmation_number
     context.context.seat_number = new_seat
     assert context.context.flight_number is not None, "Flight number is required"
-    return f"Updated seat to {new_seat} for confirmation number {confirmation_number}"
+    result = f"Updated seat to {new_seat} for confirmation number {confirmation_number}"
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="Seat Booking Agent",
+        tool_name="update_seat",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 @function_tool(
     name_override="flight_status_tool",
@@ -80,7 +120,25 @@ async def update_seat(
 )
 async def flight_status_tool(flight_number: str) -> str:
     """Lookup the status for a flight."""
-    return f"Flight {flight_number} is on time and scheduled to depart at gate A10."
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="Flight Status Agent",
+        tool_name="flight_status_tool",
+        tool_args={"flight_number": flight_number},
+        conversation_id=None
+    )
+    
+    result = f"Flight {flight_number} is on time and scheduled to depart at gate A10."
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="Flight Status Agent",
+        tool_name="flight_status_tool",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 @function_tool(
     name_override="baggage_tool",
@@ -88,12 +146,31 @@ async def flight_status_tool(flight_number: str) -> str:
 )
 async def baggage_tool(query: str) -> str:
     """Lookup baggage allowance and fees."""
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="Triage Agent",
+        tool_name="baggage_tool",
+        tool_args={"query": query},
+        conversation_id=None
+    )
+    
     q = query.lower()
     if "fee" in q:
-        return "Overweight bag fee is $75."
-    if "allowance" in q:
-        return "One carry-on and one checked bag (up to 50 lbs) are included."
-    return "Please provide details about your baggage inquiry."
+        result = "Overweight bag fee is $75."
+    elif "allowance" in q:
+        result = "One carry-on and one checked bag (up to 50 lbs) are included."
+    else:
+        result = "Please provide details about your baggage inquiry."
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="Triage Agent",
+        tool_name="baggage_tool",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 @function_tool(
     name_override="display_seat_map",
@@ -103,8 +180,26 @@ async def display_seat_map(
     context: RunContextWrapper[AirlineAgentContext]
 ) -> str:
     """Trigger the UI to show an interactive seat map to the customer."""
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="Seat Booking Agent",
+        tool_name="display_seat_map",
+        tool_args={},
+        conversation_id=None
+    )
+    
     # The returned string will be interpreted by the UI to open the seat selector.
-    return "DISPLAY_SEAT_MAP"
+    result = "DISPLAY_SEAT_MAP"
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="Seat Booking Agent",
+        tool_name="display_seat_map",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 # =========================
 # HOOKS
@@ -112,6 +207,15 @@ async def display_seat_map(
 
 async def on_seat_booking_handoff(context: RunContextWrapper[AirlineAgentContext]) -> None:
     """Set a random flight number when handed off to the seat booking agent."""
+    # Log do hook de handoff
+    llm_logger.log_agent_transition(
+        from_agent="Triage Agent",
+        to_agent="Seat Booking Agent",
+        reason="seat_booking_handoff_hook",
+        conversation_id=None,
+        context=context.context.model_dump() if context.context else {}
+    )
+    
     context.context.flight_number = f"FLT-{random.randint(100, 999)}"
     context.context.confirmation_number = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
@@ -239,14 +343,41 @@ async def cancel_flight(
     context: RunContextWrapper[AirlineAgentContext]
 ) -> str:
     """Cancel the flight in the context."""
+    # Log da chamada da ferramenta
+    llm_logger.log_tool_call(
+        agent_name="Cancellation Agent",
+        tool_name="cancel_flight",
+        tool_args={},
+        conversation_id=None
+    )
+    
     fn = context.context.flight_number
     assert fn is not None, "Flight number is required"
-    return f"Flight {fn} successfully cancelled"
+    result = f"Flight {fn} successfully cancelled"
+    
+    # Log do resultado da ferramenta
+    llm_logger.log_tool_result(
+        agent_name="Cancellation Agent",
+        tool_name="cancel_flight",
+        result=result,
+        conversation_id=None
+    )
+    
+    return result
 
 async def on_cancellation_handoff(
     context: RunContextWrapper[AirlineAgentContext]
 ) -> None:
     """Ensure context has a confirmation and flight number when handing off to cancellation."""
+    # Log do hook de handoff
+    llm_logger.log_agent_transition(
+        from_agent="Triage Agent",
+        to_agent="Cancellation Agent",
+        reason="cancellation_handoff_hook",
+        conversation_id=None,
+        context=context.context.model_dump() if context.context else {}
+    )
+    
     if context.context.confirmation_number is None:
         context.context.confirmation_number = "".join(
             random.choices(string.ascii_uppercase + string.digits, k=6)

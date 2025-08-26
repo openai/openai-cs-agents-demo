@@ -80,7 +80,7 @@ async def update_seat(
 )
 async def flight_status_tool(flight_number: str) -> str:
     """Lookup the status for a flight."""
-    return f"Flight {flight_number} is on time and scheduled to depart at gate A10."
+    return f"Flight number {flight_number} is on time and scheduled to depart at gate A10."
 
 @function_tool(
     name_override="baggage_tool",
@@ -102,8 +102,9 @@ async def baggage_tool(query: str) -> str:
 async def display_seat_map(
     context: RunContextWrapper[AirlineAgentContext]
 ) -> str:
-    """Trigger the UI to show an interactive seat map to the customer."""
-    # The returned string will be interpreted by the UI to open the seat selector.
+    """Trigger the UI to display an interactive seat map for the customer to select their preferred seat.
+    Returns a UI command string that the front-end interprets to open the seat selection interface.
+    """
     return "DISPLAY_SEAT_MAP"
 
 # =========================
@@ -188,9 +189,9 @@ def seat_booking_instructions(
     confirmation = ctx.confirmation_number or "[unknown]"
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are a seat booking agent. If you are speaking to a customer, you probably were transferred to from the triage agent.\n"
+        "You are a seat booking agent. If you are speaking to a customer, you were probably transferred from the triage agent.\n"
         "Use the following routine to support the customer.\n"
-        f"1. The customer's confirmation number is {confirmation}."+
+        f"1. The customer's confirmation number is {confirmation}. "
         "If this is not available, ask the customer for their confirmation number. If you have it, confirm that is the confirmation number they are referencing.\n"
         "2. Ask the customer what their desired seat number is. You can also use the display_seat_map tool to show them an interactive seat map where they can click to select their preferred seat.\n"
         "3. Use the update seat tool to update the seat on the flight.\n"

@@ -145,6 +145,8 @@ async def relevance_guardrail(
     """Guardrail to check if input is relevant to airline topics."""
     result = await Runner.run(guardrail_agent, input, context=context.context)
     final = result.final_output_as(RelevanceOutput)
+    if not final.is_relevant:
+        print(f"[Guardrail Triggered] Relevance guardrail activated. Reason: {final.reasoning}")
     return GuardrailFunctionOutput(output_info=final, tripwire_triggered=not final.is_relevant)
 
 class JailbreakOutput(BaseModel):
@@ -175,6 +177,8 @@ async def jailbreak_guardrail(
     """Guardrail to detect jailbreak attempts."""
     result = await Runner.run(jailbreak_guardrail_agent, input, context=context.context)
     final = result.final_output_as(JailbreakOutput)
+    if not final.is_safe:
+        print(f"[Guardrail Triggered] Jailbreak guardrail activated. Reason: {final.reasoning}")
     return GuardrailFunctionOutput(output_info=final, tripwire_triggered=not final.is_safe)
 
 # =========================

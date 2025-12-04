@@ -21,7 +21,6 @@ class MemoryStore(Store[dict[str, Any]]):
     def __init__(self) -> None:
         self._threads: Dict[str, _ThreadState] = {}
         self._attachments: Dict[str, Attachment] = {}
-        self._attachment_bytes: Dict[str, bytes] = {}
 
     def generate_attachment_id(self, mime_type: str, context: dict[str, Any]) -> str:
         """Return a new identifier for an attachment."""
@@ -160,7 +159,6 @@ class MemoryStore(Store[dict[str, Any]]):
         context: dict[str, Any],
     ) -> None:
         self._attachments[attachment.id] = attachment.model_copy(deep=True)
-        # Bytes are populated by the upload endpoint, not here.
 
     async def load_attachment(
         self,
@@ -174,11 +172,3 @@ class MemoryStore(Store[dict[str, Any]]):
 
     async def delete_attachment(self, attachment_id: str, context: dict[str, Any]) -> None:
         self._attachments.pop(attachment_id, None)
-        self._attachment_bytes.pop(attachment_id, None)
-
-    # -- Attachment bytes helpers (in-memory demo only) -----------------
-    def set_attachment_bytes(self, attachment_id: str, data: bytes) -> None:
-        self._attachment_bytes[attachment_id] = data
-
-    def get_attachment_bytes(self, attachment_id: str) -> bytes | None:
-        return self._attachment_bytes.get(attachment_id)

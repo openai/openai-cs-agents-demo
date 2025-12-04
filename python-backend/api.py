@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import logging
 import time
 from dataclasses import dataclass, field
@@ -8,7 +7,7 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -23,14 +22,12 @@ from agents import (
     ToolCallItem,
     ToolCallOutputItem,
 )
-from chatkit.agents import ThreadItemConverter, stream_agent_response
+from chatkit.agents import stream_agent_response
 from chatkit.server import ChatKitServer, StreamingResult
 from chatkit.types import (
     Action,
     AssistantMessageContent,
     AssistantMessageItem,
-    FileAttachment,
-    ImageAttachment,
     ThreadItemDoneEvent,
     ThreadMetadata,
     ThreadStreamEvent,
@@ -38,7 +35,6 @@ from chatkit.types import (
     WidgetItem,
 )
 from chatkit.store import NotFoundError
-from openai.types.responses import ResponseInputImageParam, ResponseInputTextParam
 
 from main import (
     AirlineAgentChatContext,
@@ -162,52 +158,11 @@ class ConversationState:
     guardrails: List[GuardrailCheck] = field(default_factory=list)
 
 
-class DemoThreadItemConverter(ThreadItemConverter):
-    """Convert attachments into model-readable input."""
-
-    async def attachment_to_message_content(self, attachment):
-        name = getattr(attachment, "name", "") or attachment.id
-        mime = getattr(attachment, "mime_type", "application/octet-stream")
-        # Try to load raw bytes from the store if available (only works with MemoryStore)
-        data: bytes | None = None
-        store_bytes = getattr(self, "_attachment_bytes_lookup", None)
-        if callable(store_bytes):
-            data = await store_bytes(attachment.id)
-
-        if isinstance(attachment, ImageAttachment):
-            url = getattr(attachment, "preview_url", None)
-            if data:
-                b64 = base64.b64encode(data).decode("ascii")
-                url = f"data:{mime};base64,{b64}"
-            if not url:
-                raise ValueError("Image attachment missing preview_url")
-            return ResponseInputImageParam(
-                type="input_image",
-                image_url=url,
-                detail="auto",
-            )
-        # Non-image: describe as text reference
-        return ResponseInputTextParam(
-            type="input_text",
-            text=f"[Attached file] name={name} mime={mime} id={attachment.id}",
-        )
-
-
 class AirlineServer(ChatKitServer[dict[str, Any]]):
     def __init__(self) -> None:
         self.store = MemoryStore()
         super().__init__(self.store)
         self._state: Dict[str, ConversationState] = {}
-        converter = DemoThreadItemConverter()
-        # Provide a bytes lookup helper for the converter (MemoryStore only)
-        async def _lookup_bytes(att_id: str) -> bytes | None:
-            getter = getattr(self.store, "get_attachment_bytes", None)
-            if callable(getter):
-                return getter(att_id)
-            return None
-
-        converter._attachment_bytes_lookup = _lookup_bytes  # type: ignore[attr-defined]
-        self.thread_item_converter = converter
 
     def _state_for_thread(self, thread_id: str) -> ConversationState:
         if thread_id not in self._state:
@@ -490,40 +445,6 @@ async def chatkit_bootstrap(
     server: AirlineServer = Depends(get_server),
 ) -> Dict[str, Any]:
     return await server.snapshot(None, {"request": None})
-
-
-@app.post("/chatkit/upload")
-async def chatkit_upload(
-    file: UploadFile = File(...),
-    server: AirlineServer = Depends(get_server),
-) -> Dict[str, Any]:
-    """
-    Direct-upload handler for ChatKit attachments.
-    Stores files in memory for demo purposes.
-    """
-    data = await file.read()
-    mime = file.content_type or "application/octet-stream"
-    att_id = server.store.generate_attachment_id(mime, {})
-    attachment_type = "image" if mime.startswith("image/") else "file"
-
-    if attachment_type == "image":
-        b64 = base64.b64encode(data).decode("ascii")
-        attachment = ImageAttachment(
-            id=att_id,
-            name=file.filename or att_id,
-            mime_type=mime,
-            preview_url=f"data:{mime};base64,{b64}",
-        )
-    else:
-        attachment = FileAttachment(
-            id=att_id,
-            name=file.filename or att_id,
-            mime_type=mime,
-        )
-
-    await server.store.save_attachment(attachment, {})
-    server.store.set_attachment_bytes(att_id, data)
-    return attachment.model_dump(exclude_none=True)
 
 
 @app.get("/health")

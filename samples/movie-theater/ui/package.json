@@ -1,0 +1,40 @@
+{
+  "name": "openai-cinema-agentsdk-demo",
+  "description": "An interface for movie theater agent orchestration.",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:next": "npx next dev",
+    "dev:server": "cd ../python-backend && .venv/bin/uvicorn api:app --reload --host 0.0.0.0 --port 8000",
+    "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@radix-ui/react-scroll-area": "^1.2.9",
+    "@radix-ui/react-slot": "^1.1.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.484.0",
+    "motion": "^12.4.10",
+    "next": "^15.2.4",
+    "openai": "^4.87.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^15.6.1",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss-animate": "^1.0.7",
+    "wavtools": "^0.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "concurrently": "^9.1.2",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
+  }
+}

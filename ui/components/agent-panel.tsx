@@ -12,13 +12,7 @@ interface AgentPanelProps {
   currentAgent: string;
   events: AgentEvent[];
   guardrails: GuardrailCheck[];
-  context: {
-    passenger_name?: string;
-    confirmation_number?: string;
-    seat_number?: string;
-    flight_number?: string;
-    account_number?: string;
-  };
+  context: Record<string, any>;
 }
 
 export function AgentPanel({

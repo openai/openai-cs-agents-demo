@@ -5,16 +5,37 @@ import { Card, CardContent } from "@/components/ui/card";
 import { BookText } from "lucide-react";
 
 interface ConversationContextProps {
-  context: {
-    passenger_name?: string;
-    confirmation_number?: string;
-    seat_number?: string;
-    flight_number?: string;
-    account_number?: string;
-  };
+  context: Record<string, any>;
 }
 
 export function ConversationContext({ context }: ConversationContextProps) {
+  const formatValue = (value: any) => {
+    if (value === null || value === undefined || value === "") return "null";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "[]";
+      // Render small arrays directly, otherwise summarize count.
+      if (value.length <= 3) {
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return `${value.length} items`;
+        }
+      }
+      return `${value.length} items`;
+    }
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return "object";
+      }
+    }
+    return String(value);
+  };
+
   return (
     <PanelSection
       title="Conversation Context"
@@ -28,19 +49,33 @@ export function ConversationContext({ context }: ConversationContextProps) {
                 key={key}
                 className="flex items-center gap-2 bg-white p-2 rounded-md border border-gray-200 shadow-sm transition-all"
               >
-                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                <div className="text-xs">
-                  <span className="text-zinc-500 font-light">{key}:</span>{" "}
-                  <span
-                    className={
-                      value
-                        ? "text-zinc-900 font-light"
-                        : "text-gray-400 italic"
-                    }
-                  >
-                    {value || "null"}
-                  </span>
-                </div>
+                {(() => {
+                  const rendered = formatValue(value);
+                  const multiline = String(rendered).includes("\n");
+                  return (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <div className="text-xs space-y-1">
+                        <div className="text-zinc-500 font-light">{key}:</div>
+                        {multiline ? (
+                          <pre className="text-[11px] leading-4 text-zinc-900 bg-gray-50 p-2 rounded border border-gray-200 overflow-auto max-h-40">
+                            {rendered}
+                          </pre>
+                        ) : (
+                          <span
+                            className={
+                              value
+                                ? "text-zinc-900 font-light"
+                                : "text-gray-400 italic"
+                            }
+                          >
+                            {rendered}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>

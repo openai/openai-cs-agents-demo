@@ -39,11 +39,13 @@ from chatkit.store import NotFoundError
 from main import (
     AirlineAgentChatContext,
     AirlineAgentContext,
-    cancellation_agent,
+    baggage_agent,
+    booking_cancellation_agent,
     create_initial_context,
     faq_agent,
-    flight_status_agent,
-    seat_booking_agent,
+    flight_information_agent,
+    refunds_compensation_agent,
+    seat_special_services_agent,
     triage_agent,
 )
 from memory_store import MemoryStore
@@ -87,9 +89,11 @@ def _get_agent_by_name(name: str):
     agents = {
         triage_agent.name: triage_agent,
         faq_agent.name: faq_agent,
-        seat_booking_agent.name: seat_booking_agent,
-        flight_status_agent.name: flight_status_agent,
-        cancellation_agent.name: cancellation_agent,
+        seat_special_services_agent.name: seat_special_services_agent,
+        flight_information_agent.name: flight_information_agent,
+        booking_cancellation_agent.name: booking_cancellation_agent,
+        refunds_compensation_agent.name: refunds_compensation_agent,
+        baggage_agent.name: baggage_agent,
     }
     return agents.get(name, triage_agent)
 
@@ -123,9 +127,11 @@ def _build_agents_list() -> List[Dict[str, Any]]:
     return [
         make_agent_dict(triage_agent),
         make_agent_dict(faq_agent),
-        make_agent_dict(seat_booking_agent),
-        make_agent_dict(flight_status_agent),
-        make_agent_dict(cancellation_agent),
+        make_agent_dict(seat_special_services_agent),
+        make_agent_dict(flight_information_agent),
+        make_agent_dict(booking_cancellation_agent),
+        make_agent_dict(refunds_compensation_agent),
+        make_agent_dict(baggage_agent),
     ]
 
 

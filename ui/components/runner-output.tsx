@@ -36,6 +36,18 @@ function EventIcon({ type }: { type: string }) {
   }
 }
 
+const prettyValue = (value: any) => {
+  if (value === null || value === undefined || value === "") return "null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "object";
+  }
+};
+
 function EventDetails({ event }: { event: AgentEvent }) {
   let details = null;
   const className =
@@ -82,9 +94,11 @@ function EventDetails({ event }: { event: AgentEvent }) {
         <div className={className}>
           {Object.entries(event.metadata.changes).map(([key, value]) => (
             <div key={key} className="text-xs">
-              <div className="text-gray-600">
-                <span className="text-zinc-600 font-medium">{key}:</span>{" "}
-                {value ?? "null"}
+              <div className="text-gray-600 flex flex-col gap-1">
+                <span className="text-zinc-600 font-medium">{key}:</span>
+                <pre className="bg-gray-50 text-gray-700 p-2 rounded border border-gray-200 overflow-auto max-h-32">
+                  {prettyValue(value)}
+                </pre>
               </div>
             </div>
           ))}

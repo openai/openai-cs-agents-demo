@@ -336,24 +336,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             state=state.context,
         )
         streamed_items_seen = 0
-        consumer_task: asyncio.Task | None = None
-
-        async def consume_run_events():
-            nonlocal streamed_items_seen
-            try:
-                async for _ in result.stream_events():
-                    new_items = result.new_items[streamed_items_seen:]
-                    if new_items:
-                        new_events, active_agent = self._record_events(
-                            new_items, state.current_agent_name
-                        )
-                        state.events.extend(new_events)
-                        state.current_agent_name = active_agent
-                        streamed_items_seen += len(new_items)
-                        logger.info("Streaming state update: %s new_items, active_agent=%s", len(new_items), active_agent)
-                        await self._broadcast_state(thread, context)
-            except Exception as err:
-                logger.warning("consume_run_events stopped due to error: %s", err)
 
         try:
             result = Runner.run_streamed(
@@ -361,9 +343,18 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 state.input_items,
                 context=chat_context,
             )
-            consumer_task = asyncio.create_task(consume_run_events())
             async for event in stream_agent_response(chat_context, result):
                 yield event
+                new_items = result.new_items[streamed_items_seen:]
+                if new_items:
+                    new_events, active_agent = self._record_events(
+                        new_items, state.current_agent_name
+                    )
+                    state.events.extend(new_events)
+                    state.current_agent_name = active_agent
+                    streamed_items_seen += len(new_items)
+                    logger.info("Streaming state update: %s new_items, active_agent=%s", len(new_items), active_agent)
+                    await self._broadcast_state(thread, context)
         except MaxTurnsExceeded as exc:
             logger.warning("Max turns exceeded: %s", exc)
             await self._broadcast_state(thread, context)
@@ -396,15 +387,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 )
             )
             return
-        finally:
-            if consumer_task:
-                if not consumer_task.done():
-                    consumer_task.cancel()
-                try:
-                    await consumer_task
-                except asyncio.CancelledError:
-                    pass
-
         state.input_items = result.to_input_list()
         remaining_items = result.new_items[streamed_items_seen:]
         new_events, active_agent = self._record_events(remaining_items, state.current_agent_name)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import uuid4
 from typing import Any, Dict, List
 
 from chatkit.store import NotFoundError, Store
@@ -19,6 +20,12 @@ class MemoryStore(Store[dict[str, Any]]):
 
     def __init__(self) -> None:
         self._threads: Dict[str, _ThreadState] = {}
+        self._attachments: Dict[str, Attachment] = {}
+        self._attachment_bytes: Dict[str, bytes] = {}
+
+    def generate_attachment_id(self, mime_type: str, context: dict[str, Any]) -> str:
+        """Return a new identifier for an attachment."""
+        return f"atc_{uuid4().hex[:8]}"
 
     @staticmethod
     def _get_thread_metadata(thread: ThreadMetadata | Thread) -> ThreadMetadata:
@@ -152,22 +159,26 @@ class MemoryStore(Store[dict[str, Any]]):
         attachment: Attachment,
         context: dict[str, Any],
     ) -> None:
-        raise NotImplementedError(
-            "MemoryStore does not persist attachments. Provide a Store implementation "
-            "that enforces authentication and authorization before enabling uploads."
-        )
+        self._attachments[attachment.id] = attachment.model_copy(deep=True)
+        # Bytes are populated by the upload endpoint, not here.
 
     async def load_attachment(
         self,
         attachment_id: str,
         context: dict[str, Any],
     ) -> Attachment:
-        raise NotImplementedError(
-            "MemoryStore does not load attachments. Provide a Store implementation "
-            "that enforces authentication and authorization before enabling uploads."
-        )
+        att = self._attachments.get(attachment_id)
+        if not att:
+            raise NotFoundError(f"Attachment {attachment_id} not found")
+        return att.model_copy(deep=True)
 
     async def delete_attachment(self, attachment_id: str, context: dict[str, Any]) -> None:
-        raise NotImplementedError(
-            "MemoryStore does not delete attachments because they are never stored."
-        )
+        self._attachments.pop(attachment_id, None)
+        self._attachment_bytes.pop(attachment_id, None)
+
+    # -- Attachment bytes helpers (in-memory demo only) -----------------
+    def set_attachment_bytes(self, attachment_id: str, data: bytes) -> None:
+        self._attachment_bytes[attachment_id] = data
+
+    def get_attachment_bytes(self, attachment_id: str) -> bytes | None:
+        return self._attachment_bytes.get(attachment_id)

@@ -20,6 +20,20 @@ export function ChatKitPanel({
     api: {
       url: "/chatkit",
       domainKey: CHATKIT_DOMAIN_KEY,
+      uploadStrategy: {
+        type: "direct",
+        uploadUrl: "/chatkit/upload",
+      },
+    },
+    composer: {
+      placeholder: "Message...",
+      attachments: {
+        enabled: true,
+        accept: {
+          "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
+        },
+        maxCount: 3,
+      },
     },
     history: {
       enabled: false,
@@ -46,9 +60,6 @@ export function ChatKitPanel({
         },
         { label: "Cancellation", prompt: "I need to cancel my trip." },
       ],
-    },
-    composer: {
-      placeholder: "Message...",
     },
     threadItemActions: {
       feedback: false,

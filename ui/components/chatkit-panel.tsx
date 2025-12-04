@@ -51,7 +51,11 @@ export function ChatKitPanel({
         </h2>
       </div>
       <div className="flex-1 overflow-hidden">
-        <ChatKit control={chatkit.control} className="h-full w-full" />
+        <ChatKit
+          control={chatkit.control}
+          className="block h-full w-full"
+          style={{ height: "100%", width: "100%" }}
+        />
       </div>
     </div>
   );

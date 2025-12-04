@@ -1,30 +1,53 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from uuid import uuid4
-import time
-import logging
+from __future__ import annotations
 
-from main import (
-    triage_agent,
-    faq_agent,
-    seat_booking_agent,
-    flight_status_agent,
-    cancellation_agent,
-    create_initial_context,
-)
+import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, AsyncIterator, Dict, List, Optional
+from uuid import uuid4
+
+from fastapi import Depends, FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel
 
 from agents import (
-    Runner,
+    Handoff,
+    HandoffOutputItem,
+    InputGuardrailTripwireTriggered,
     ItemHelpers,
     MessageOutputItem,
-    HandoffOutputItem,
+    Runner,
     ToolCallItem,
     ToolCallOutputItem,
-    InputGuardrailTripwireTriggered,
-    Handoff,
 )
+from chatkit.agents import stream_agent_response
+from chatkit.server import ChatKitServer, StreamingResult
+from chatkit.types import (
+    Action,
+    AssistantMessageContent,
+    AssistantMessageItem,
+    ThreadItemDoneEvent,
+    ThreadMetadata,
+    ThreadStreamEvent,
+    UserMessageItem,
+    WidgetItem,
+)
+from chatkit.types import ThreadMetadata
+from chatkit.store import NotFoundError
+
+from main import (
+    AirlineAgentChatContext,
+    AirlineAgentContext,
+    cancellation_agent,
+    create_initial_context,
+    faq_agent,
+    flight_status_agent,
+    seat_booking_agent,
+    triage_agent,
+)
+from memory_store import MemoryStore
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,17 +64,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
-# Models
-# =========================
-
-class ChatRequest(BaseModel):
-    conversation_id: Optional[str] = None
-    message: str
-
-class MessageResponse(BaseModel):
-    content: str
-    agent: str
 
 class AgentEvent(BaseModel):
     id: str
@@ -61,6 +73,7 @@ class AgentEvent(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[float] = None
 
+
 class GuardrailCheck(BaseModel):
     id: str
     name: str
@@ -69,41 +82,6 @@ class GuardrailCheck(BaseModel):
     passed: bool
     timestamp: float
 
-class ChatResponse(BaseModel):
-    conversation_id: str
-    current_agent: str
-    messages: List[MessageResponse]
-    events: List[AgentEvent]
-    context: Dict[str, Any]
-    agents: List[Dict[str, Any]]
-    guardrails: List[GuardrailCheck] = []
-
-# =========================
-# In-memory store for conversation state
-# =========================
-
-class ConversationStore:
-    def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
-        pass
-
-    def save(self, conversation_id: str, state: Dict[str, Any]):
-        pass
-
-class InMemoryConversationStore(ConversationStore):
-    _conversations: Dict[str, Dict[str, Any]] = {}
-
-    def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
-        return self._conversations.get(conversation_id)
-
-    def save(self, conversation_id: str, state: Dict[str, Any]):
-        self._conversations[conversation_id] = state
-
-# TODO: when deploying this app in scale, switch to your own production-ready implementation
-conversation_store = InMemoryConversationStore()
-
-# =========================
-# Helpers
-# =========================
 
 def _get_agent_by_name(name: str):
     """Return the agent object by name."""
@@ -115,6 +93,7 @@ def _get_agent_by_name(name: str):
         cancellation_agent.name: cancellation_agent,
     }
     return agents.get(name, triage_agent)
+
 
 def _get_guardrail_name(g) -> str:
     """Extract a friendly guardrail name."""
@@ -129,8 +108,10 @@ def _get_guardrail_name(g) -> str:
         return fn_name.replace("_", " ").title()
     return str(g)
 
+
 def _build_agents_list() -> List[Dict[str, Any]]:
     """Build a list of all available agents and their metadata."""
+
     def make_agent_dict(agent):
         return {
             "name": agent.name,
@@ -139,6 +120,7 @@ def _build_agents_list() -> List[Dict[str, Any]]:
             "tools": [getattr(t, "name", getattr(t, "__name__", "")) for t in getattr(agent, "tools", [])],
             "input_guardrails": [_get_guardrail_name(g) for g in getattr(agent, "input_guardrails", [])],
         }
+
     return [
         make_agent_dict(triage_agent),
         make_agent_dict(faq_agent),
@@ -147,201 +129,325 @@ def _build_agents_list() -> List[Dict[str, Any]]:
         make_agent_dict(cancellation_agent),
     ]
 
-# =========================
-# Main Chat Endpoint
-# =========================
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(req: ChatRequest):
-    """
-    Main chat endpoint for agent orchestration.
-    Handles conversation state, agent routing, and guardrail checks.
-    """
-    # Initialize or retrieve conversation state
-    is_new = not req.conversation_id or conversation_store.get(req.conversation_id) is None
-    if is_new:
-        conversation_id: str = uuid4().hex
-        ctx = create_initial_context()
-        current_agent_name = triage_agent.name
-        state: Dict[str, Any] = {
-            "input_items": [],
-            "context": ctx,
-            "current_agent": current_agent_name,
-        }
-        if req.message.strip() == "":
-            conversation_store.save(conversation_id, state)
-            return ChatResponse(
-                conversation_id=conversation_id,
-                current_agent=current_agent_name,
-                messages=[],
-                events=[],
-                context=ctx.model_dump(),
-                agents=_build_agents_list(),
-                guardrails=[],
-            )
-    else:
-        conversation_id = req.conversation_id  # type: ignore
-        state = conversation_store.get(conversation_id)
+def _user_message_to_text(message: UserMessageItem) -> str:
+    parts: List[str] = []
+    for part in message.content:
+        text = getattr(part, "text", "")
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)
 
-    current_agent = _get_agent_by_name(state["current_agent"])
-    state["input_items"].append({"content": req.message, "role": "user"})
-    old_context = state["context"].model_dump().copy()
-    guardrail_checks: List[GuardrailCheck] = []
 
-    try:
-        result = await Runner.run(current_agent, state["input_items"], context=state["context"])
-    except InputGuardrailTripwireTriggered as e:
-        failed = e.guardrail_result.guardrail
-        gr_output = e.guardrail_result.output.output_info
-        gr_reasoning = getattr(gr_output, "reasoning", "")
-        gr_input = req.message
-        gr_timestamp = time.time() * 1000
-        for g in current_agent.input_guardrails:
-            guardrail_checks.append(GuardrailCheck(
-                id=uuid4().hex,
-                name=_get_guardrail_name(g),
-                input=gr_input,
-                reasoning=(gr_reasoning if g == failed else ""),
-                passed=(g != failed),
-                timestamp=gr_timestamp,
-            ))
-        refusal = "Sorry, I can only answer questions related to airline travel."
-        state["input_items"].append({"role": "assistant", "content": refusal})
-        return ChatResponse(
-            conversation_id=conversation_id,
-            current_agent=current_agent.name,
-            messages=[MessageResponse(content=refusal, agent=current_agent.name)],
-            events=[],
-            context=state["context"].model_dump(),
-            agents=_build_agents_list(),
-            guardrails=guardrail_checks,
-        )
+def _parse_tool_args(raw_args: Any) -> Any:
+    if isinstance(raw_args, str):
+        try:
+            import json
 
-    messages: List[MessageResponse] = []
-    events: List[AgentEvent] = []
+            return json.loads(raw_args)
+        except Exception:
+            return raw_args
+    return raw_args
 
-    for item in result.new_items:
-        if isinstance(item, MessageOutputItem):
-            text = ItemHelpers.text_message_output(item)
-            messages.append(MessageResponse(content=text, agent=item.agent.name))
-            events.append(AgentEvent(id=uuid4().hex, type="message", agent=item.agent.name, content=text))
-        # Handle handoff output and agent switching
-        elif isinstance(item, HandoffOutputItem):
-            # Record the handoff event
-            events.append(
-                AgentEvent(
+
+@dataclass
+class ConversationState:
+    input_items: List[Any] = field(default_factory=list)
+    context: AirlineAgentContext = field(default_factory=create_initial_context)
+    current_agent_name: str = triage_agent.name
+    events: List[AgentEvent] = field(default_factory=list)
+    guardrails: List[GuardrailCheck] = field(default_factory=list)
+
+
+class AirlineServer(ChatKitServer[dict[str, Any]]):
+    def __init__(self) -> None:
+        self.store = MemoryStore()
+        super().__init__(self.store)
+        self._state: Dict[str, ConversationState] = {}
+
+    def _state_for_thread(self, thread_id: str) -> ConversationState:
+        if thread_id not in self._state:
+            self._state[thread_id] = ConversationState()
+        return self._state[thread_id]
+
+    async def _ensure_thread(
+        self, thread_id: Optional[str], context: dict[str, Any]
+    ) -> ThreadMetadata:
+        if thread_id:
+            try:
+                return await self.store.load_thread(thread_id, context)
+            except NotFoundError:
+                pass
+        new_thread = ThreadMetadata(id=self.store.generate_thread_id(context), created_at=datetime.now())
+        await self.store.save_thread(new_thread, context)
+        self._state_for_thread(new_thread.id)
+        return new_thread
+
+    def _record_guardrails(
+        self,
+        agent_name: str,
+        input_text: str,
+        guardrail_results: List[Any],
+    ) -> List[GuardrailCheck]:
+        checks: List[GuardrailCheck] = []
+        timestamp = time.time() * 1000
+        agent = _get_agent_by_name(agent_name)
+        for guardrail in getattr(agent, "input_guardrails", []):
+            result = next((r for r in guardrail_results if r.guardrail == guardrail), None)
+            reasoning = ""
+            passed = True
+            if result:
+                info = getattr(result.output, "output_info", None)
+                reasoning = getattr(info, "reasoning", "") or reasoning
+                passed = not result.output.tripwire_triggered
+            checks.append(
+                GuardrailCheck(
                     id=uuid4().hex,
-                    type="handoff",
-                    agent=item.source_agent.name,
-                    content=f"{item.source_agent.name} -> {item.target_agent.name}",
-                    metadata={"source_agent": item.source_agent.name, "target_agent": item.target_agent.name},
+                    name=_get_guardrail_name(guardrail),
+                    input=input_text,
+                    reasoning=reasoning,
+                    passed=passed,
+                    timestamp=timestamp,
                 )
             )
-            # If there is an on_handoff callback defined for this handoff, show it as a tool call
-            from_agent = item.source_agent
-            to_agent = item.target_agent
-            # Find the Handoff object on the source agent matching the target
-            ho = next(
-                (h for h in getattr(from_agent, "handoffs", [])
-                 if isinstance(h, Handoff) and getattr(h, "agent_name", None) == to_agent.name),
-                None,
-            )
-            if ho:
-                fn = ho.on_invoke_handoff
-                fv = fn.__code__.co_freevars
-                cl = fn.__closure__ or []
-                if "on_handoff" in fv:
-                    idx = fv.index("on_handoff")
-                    if idx < len(cl) and cl[idx].cell_contents:
-                        cb = cl[idx].cell_contents
-                        cb_name = getattr(cb, "__name__", repr(cb))
-                        events.append(
-                            AgentEvent(
-                                id=uuid4().hex,
-                                type="tool_call",
-                                agent=to_agent.name,
-                                content=cb_name,
-                            )
-                        )
-            current_agent = item.target_agent
-        elif isinstance(item, ToolCallItem):
-            tool_name = getattr(item.raw_item, "name", None)
-            raw_args = getattr(item.raw_item, "arguments", None)
-            tool_args: Any = raw_args
-            if isinstance(raw_args, str):
-                try:
-                    import json
-                    tool_args = json.loads(raw_args)
-                except Exception:
-                    pass
-            events.append(
-                AgentEvent(
-                    id=uuid4().hex,
-                    type="tool_call",
-                    agent=item.agent.name,
-                    content=tool_name or "",
-                    metadata={"tool_args": tool_args},
-                )
-            )
-            # If the tool is display_seat_map, send a special message so the UI can render the seat selector.
-            if tool_name == "display_seat_map":
-                messages.append(
-                    MessageResponse(
-                        content="DISPLAY_SEAT_MAP",
+        return checks
+
+    def _record_events(
+        self,
+        run_items: List[Any],
+        current_agent_name: str,
+    ) -> (List[AgentEvent], str):
+        events: List[AgentEvent] = []
+        active_agent = current_agent_name
+        now_ms = time.time() * 1000
+
+        for item in run_items:
+            if isinstance(item, MessageOutputItem):
+                text = ItemHelpers.text_message_output(item)
+                events.append(
+                    AgentEvent(
+                        id=uuid4().hex,
+                        type="message",
                         agent=item.agent.name,
+                        content=text,
+                        timestamp=now_ms,
                     )
                 )
-        elif isinstance(item, ToolCallOutputItem):
-            events.append(
+            elif isinstance(item, HandoffOutputItem):
+                events.append(
+                    AgentEvent(
+                        id=uuid4().hex,
+                        type="handoff",
+                        agent=item.source_agent.name,
+                        content=f"{item.source_agent.name} -> {item.target_agent.name}",
+                        metadata={"source_agent": item.source_agent.name, "target_agent": item.target_agent.name},
+                        timestamp=now_ms,
+                    )
+                )
+
+                from_agent = item.source_agent
+                to_agent = item.target_agent
+                ho = next(
+                    (
+                        h
+                        for h in getattr(from_agent, "handoffs", [])
+                        if isinstance(h, Handoff) and getattr(h, "agent_name", None) == to_agent.name
+                    ),
+                    None,
+                )
+                if ho:
+                    fn = ho.on_invoke_handoff
+                    fv = fn.__code__.co_freevars
+                    cl = fn.__closure__ or []
+                    if "on_handoff" in fv:
+                        idx = fv.index("on_handoff")
+                        if idx < len(cl) and cl[idx].cell_contents:
+                            cb = cl[idx].cell_contents
+                            cb_name = getattr(cb, "__name__", repr(cb))
+                            events.append(
+                                AgentEvent(
+                                    id=uuid4().hex,
+                                    type="tool_call",
+                                    agent=to_agent.name,
+                                    content=cb_name,
+                                    timestamp=now_ms,
+                                )
+                            )
+
+                active_agent = to_agent.name
+            elif isinstance(item, ToolCallItem):
+                tool_name = getattr(item.raw_item, "name", None)
+                raw_args = getattr(item.raw_item, "arguments", None)
+                events.append(
+                    AgentEvent(
+                        id=uuid4().hex,
+                        type="tool_call",
+                        agent=item.agent.name,
+                        content=tool_name or "",
+                        metadata={"tool_args": _parse_tool_args(raw_args)},
+                        timestamp=now_ms,
+                    )
+                )
+            elif isinstance(item, ToolCallOutputItem):
+                events.append(
+                    AgentEvent(
+                        id=uuid4().hex,
+                        type="tool_output",
+                        agent=item.agent.name,
+                        content=str(item.output),
+                        metadata={"tool_result": item.output},
+                        timestamp=now_ms,
+                    )
+                )
+
+        return events, active_agent
+
+    async def respond(
+        self,
+        thread: ThreadMetadata,
+        input_user_message: UserMessageItem | None,
+        context: dict[str, Any],
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        state = self._state_for_thread(thread.id)
+        user_text = ""
+        if input_user_message is not None:
+            user_text = _user_message_to_text(input_user_message)
+            state.input_items.append({"content": user_text, "role": "user"})
+
+        previous_context = state.context.model_dump()
+        chat_context = AirlineAgentChatContext(
+            thread=thread,
+            store=self.store,
+            request_context=context,
+            state=state.context,
+        )
+
+        try:
+            result = Runner.run_streamed(
+                _get_agent_by_name(state.current_agent_name),
+                state.input_items,
+                context=chat_context,
+            )
+            async for event in stream_agent_response(chat_context, result):
+                yield event
+        except InputGuardrailTripwireTriggered as exc:
+            failed_guardrail = exc.guardrail_result.guardrail
+            gr_output = exc.guardrail_result.output.output_info
+            reasoning = getattr(gr_output, "reasoning", "")
+            timestamp = time.time() * 1000
+            checks: List[GuardrailCheck] = []
+            for guardrail in _get_agent_by_name(state.current_agent_name).input_guardrails:
+                checks.append(
+                    GuardrailCheck(
+                        id=uuid4().hex,
+                        name=_get_guardrail_name(guardrail),
+                        input=user_text,
+                        reasoning=reasoning if guardrail == failed_guardrail else "",
+                        passed=guardrail != failed_guardrail,
+                        timestamp=timestamp,
+                    )
+                )
+            state.guardrails = checks
+            refusal = "Sorry, I can only answer questions related to airline travel."
+            state.input_items.append({"role": "assistant", "content": refusal})
+            yield ThreadItemDoneEvent(
+                item=AssistantMessageItem(
+                    id=self.store.generate_item_id("message", thread, context),
+                    thread_id=thread.id,
+                    created_at=datetime.now(),
+                    content=[AssistantMessageContent(text=refusal)],
+                )
+            )
+            return
+
+        state.input_items = result.to_input_list()
+        new_events, active_agent = self._record_events(result.new_items, state.current_agent_name)
+        state.events.extend(new_events)
+        final_agent_name = active_agent
+        try:
+            final_agent_name = result.last_agent.name
+        except Exception:
+            pass
+        state.current_agent_name = final_agent_name
+        state.guardrails = self._record_guardrails(
+            agent_name=state.current_agent_name,
+            input_text=user_text,
+            guardrail_results=result.input_guardrail_results,
+        )
+
+        new_context = state.context.model_dump()
+        changes = {k: new_context[k] for k in new_context if previous_context.get(k) != new_context[k]}
+        if changes:
+            state.events.append(
                 AgentEvent(
                     id=uuid4().hex,
-                    type="tool_output",
-                    agent=item.agent.name,
-                    content=str(item.output),
-                    metadata={"tool_result": item.output},
+                    type="context_update",
+                    agent=state.current_agent_name,
+                    content="",
+                    metadata={"changes": changes},
+                    timestamp=time.time() * 1000,
                 )
             )
 
-    new_context = state["context"].dict()
-    changes = {k: new_context[k] for k in new_context if old_context.get(k) != new_context[k]}
-    if changes:
-        events.append(
-            AgentEvent(
-                id=uuid4().hex,
-                type="context_update",
-                agent=current_agent.name,
-                content="",
-                metadata={"changes": changes},
-            )
-        )
+    async def action(
+        self,
+        thread: ThreadMetadata,
+        action: Action[str, Any],
+        sender: WidgetItem | None,
+        context: dict[str, Any],
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        # No client-handled actions in this demo.
+        if False:
+            yield
 
-    state["input_items"] = result.to_input_list()
-    state["current_agent"] = current_agent.name
-    conversation_store.save(conversation_id, state)
+    async def snapshot(self, thread_id: Optional[str], context: dict[str, Any]) -> Dict[str, Any]:
+        thread = await self._ensure_thread(thread_id, context)
+        state = self._state_for_thread(thread.id)
+        return {
+            "thread_id": thread.id,
+            "current_agent": state.current_agent_name,
+            "context": state.context.model_dump(),
+            "agents": _build_agents_list(),
+            "events": [e.model_dump() for e in state.events],
+            "guardrails": [g.model_dump() for g in state.guardrails],
+        }
 
-    # Build guardrail results: mark failures (if any), and any others as passed
-    final_guardrails: List[GuardrailCheck] = []
-    for g in getattr(current_agent, "input_guardrails", []):
-        name = _get_guardrail_name(g)
-        failed = next((gc for gc in guardrail_checks if gc.name == name), None)
-        if failed:
-            final_guardrails.append(failed)
-        else:
-            final_guardrails.append(GuardrailCheck(
-                id=uuid4().hex,
-                name=name,
-                input=req.message,
-                reasoning="",
-                passed=True,
-                timestamp=time.time() * 1000,
-            ))
 
-    return ChatResponse(
-        conversation_id=conversation_id,
-        current_agent=current_agent.name,
-        messages=messages,
-        events=events,
-        context=state["context"].dict(),
-        agents=_build_agents_list(),
-        guardrails=final_guardrails,
-    )
+server = AirlineServer()
+
+
+def get_server() -> AirlineServer:
+    return server
+
+
+@app.post("/chatkit")
+async def chatkit_endpoint(
+    request: Request, server: AirlineServer = Depends(get_server)
+) -> Response:
+    payload = await request.body()
+    result = await server.process(payload, {"request": request})
+    if isinstance(result, StreamingResult):
+        return StreamingResponse(result, media_type="text/event-stream")
+    if hasattr(result, "json"):
+        return Response(content=result.json, media_type="application/json")
+    return Response(content=result)
+
+
+@app.get("/chatkit/state")
+async def chatkit_state(
+    thread_id: str = Query(..., description="ChatKit thread identifier"),
+    server: AirlineServer = Depends(get_server),
+) -> Dict[str, Any]:
+    return await server.snapshot(thread_id, {"request": None})
+
+
+@app.get("/chatkit/bootstrap")
+async def chatkit_bootstrap(
+    server: AirlineServer = Depends(get_server),
+) -> Dict[str, Any]:
+    return await server.snapshot(None, {"request": None})
+
+
+@app.get("/health")
+async def health_check() -> Dict[str, str]:
+    return {"status": "healthy"}

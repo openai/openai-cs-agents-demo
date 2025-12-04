@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import json
+import os
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from agents import (
     ToolCallItem,
     ToolCallOutputItem,
 )
+from agents.exceptions import MaxTurnsExceeded
 from chatkit.agents import stream_agent_response
 from chatkit.server import ChatKitServer, StreamingResult
 from chatkit.types import (
@@ -58,6 +60,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Disable tracing for zero data retention orgs
+os.environ.setdefault("OPENAI_TRACING_DISABLED", "1")
 
 # CORS configuration (adjust as needed for deployment)
 app.add_middleware(
@@ -335,19 +340,20 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
 
         async def consume_run_events():
             nonlocal streamed_items_seen
-            async for _ in result.stream_events():
-                new_items = result.new_items[streamed_items_seen:]
-                if new_items:
-                    new_events, active_agent = self._record_events(
-                        new_items, state.current_agent_name
-                    )
-                    state.events.extend(new_events)
-                    state.current_agent_name = active_agent
-                    streamed_items_seen += len(new_items)
-                    logger.info("Streaming state update: %s new_items, active_agent=%s", len(new_items), active_agent)
-                    await self._broadcast_state(thread, context)
-                else:
-                    logger.debug("Streaming event with no new_items yet.")
+            try:
+                async for _ in result.stream_events():
+                    new_items = result.new_items[streamed_items_seen:]
+                    if new_items:
+                        new_events, active_agent = self._record_events(
+                            new_items, state.current_agent_name
+                        )
+                        state.events.extend(new_events)
+                        state.current_agent_name = active_agent
+                        streamed_items_seen += len(new_items)
+                        logger.info("Streaming state update: %s new_items, active_agent=%s", len(new_items), active_agent)
+                        await self._broadcast_state(thread, context)
+            except Exception as err:
+                logger.warning("consume_run_events stopped due to error: %s", err)
 
         try:
             result = Runner.run_streamed(
@@ -358,6 +364,9 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             consumer_task = asyncio.create_task(consume_run_events())
             async for event in stream_agent_response(chat_context, result):
                 yield event
+        except MaxTurnsExceeded as exc:
+            logger.warning("Max turns exceeded: %s", exc)
+            await self._broadcast_state(thread, context)
         except InputGuardrailTripwireTriggered as exc:
             failed_guardrail = exc.guardrail_result.guardrail
             gr_output = exc.guardrail_result.output.output_info

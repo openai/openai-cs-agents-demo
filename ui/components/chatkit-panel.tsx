@@ -21,12 +21,29 @@ export function ChatKitPanel({
       url: "/chatkit",
       domainKey: CHATKIT_DOMAIN_KEY,
     },
+    history: {
+      enabled: false,
+    },
+    theme: {
+      colorScheme: "light",
+      radius: "round",
+      density: "normal",
+      color: {
+        accent: {
+          primary: "#2563eb",
+          level: 1,
+        },
+      },
+    },
     initialThread: initialThreadId ?? null,
     startScreen: {
       greeting: "Hi! I'm your airline assistant. How can I help today?",
       prompts: [
         { label: "Change my seat", prompt: "Can you move me to seat 14C?" },
-        { label: "Flight status", prompt: "What's the status of flight FLT-123?" },
+        {
+          label: "Flight status",
+          prompt: "What's the status of flight FLT-123?",
+        },
         { label: "Cancellation", prompt: "I need to cancel my trip." },
       ],
     },
@@ -50,7 +67,7 @@ export function ChatKitPanel({
           Customer View
         </h2>
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden pb-1.5">
         <ChatKit
           control={chatkit.control}
           className="block h-full w-full"

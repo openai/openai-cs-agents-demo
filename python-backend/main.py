@@ -239,20 +239,28 @@ async def get_trip_details(
 ) -> str:
     """
     If the user mentions Paris, New York, or Austin, hydrate the context with the disrupted mock itinerary.
-    Returns the detected flight and confirmation.
+    Otherwise, hydrate the on-time mock itinerary. Returns the detected flight and confirmation.
     """
     text = message.lower()
     keywords = ["paris", "new york", "austin"]
-    if any(k in text for k in keywords):
-        apply_itinerary_defaults(context.context.state, scenario_key="disrupted")
-        ctx = context.context.state
+    scenario_key = "disrupted" if any(k in text for k in keywords) else "on_time"
+    apply_itinerary_defaults(context.context.state, scenario_key=scenario_key)
+    ctx = context.context.state
+    if scenario_key == "disrupted":
         ctx.origin = ctx.origin or "Paris (CDG)"
         ctx.destination = ctx.destination or "Austin (AUS)"
-        return (
-            f"Hydrated disrupted itinerary: flight {ctx.flight_number}, confirmation "
-            f"{ctx.confirmation_number}, origin {ctx.origin}, destination {ctx.destination}."
+    segments = ctx.itinerary or []
+    segment_summaries = []
+    for seg in segments:
+        segment_summaries.append(
+            f"{seg.get('flight_number')} {seg.get('origin')} -> {seg.get('destination')} "
+            f"status: {seg.get('status')}"
         )
-    return "No matching itinerary detected."
+    summary = "; ".join(segment_summaries) if segment_summaries else "No segment details available"
+    return (
+        f"Hydrated {scenario_key} itinerary: flight {ctx.flight_number}, confirmation "
+        f"{ctx.confirmation_number}, origin {ctx.origin}, destination {ctx.destination}. {summary}"
+    )
 
 @function_tool
 async def update_seat(

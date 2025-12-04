@@ -16,22 +16,18 @@ export function ConversationContext({ context }: ConversationContextProps) {
     }
     if (Array.isArray(value)) {
       if (value.length === 0) return "[]";
-      // Render small arrays directly, otherwise summarize count.
-      if (value.length <= 3) {
-        try {
-          return JSON.stringify(value, null, 2);
-        } catch {
-          return `${value.length} items`;
-        }
+      const primitives = value.every(
+        (item) => ["string", "number", "boolean"].includes(typeof item)
+      );
+      if (primitives && value.length <= 3) {
+        return value.join(", ");
       }
-      return `${value.length} items`;
+      return `${value.length} item${value.length === 1 ? "" : "s"}`;
     }
     if (typeof value === "object") {
-      try {
-        return JSON.stringify(value, null, 2);
-      } catch {
-        return "object";
-      }
+      const keys = Object.keys(value);
+      if (keys.length === 0) return "object";
+      return `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", ..." : ""}}`;
     }
     return String(value);
   };
@@ -51,27 +47,18 @@ export function ConversationContext({ context }: ConversationContextProps) {
               >
                 {(() => {
                   const rendered = formatValue(value);
-                  const multiline = String(rendered).includes("\n");
                   return (
                     <>
                       <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                       <div className="text-xs space-y-1">
                         <div className="text-zinc-500 font-light">{key}:</div>
-                        {multiline ? (
-                          <pre className="text-[11px] leading-4 text-zinc-900 bg-gray-50 p-2 rounded border border-gray-200 overflow-auto max-h-40">
-                            {rendered}
-                          </pre>
-                        ) : (
-                          <span
-                            className={
-                              value
-                                ? "text-zinc-900 font-light"
-                                : "text-gray-400 italic"
-                            }
-                          >
-                            {rendered}
-                          </span>
-                        )}
+                        <span
+                          className={
+                            value ? "text-zinc-900 font-light break-words" : "text-gray-400 italic"
+                          }
+                        >
+                          {rendered}
+                        </span>
                       </div>
                     </>
                   );

@@ -44,6 +44,7 @@ from main import (
     create_initial_context,
     faq_agent,
     flight_information_agent,
+    public_context,
     refunds_compensation_agent,
     seat_special_services_agent,
     triage_agent,
@@ -319,7 +320,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             user_text = _user_message_to_text(input_user_message)
             state.input_items.append({"content": user_text, "role": "user"})
 
-        previous_context = state.context.model_dump()
+        previous_context = public_context(state.context)
         chat_context = AirlineAgentChatContext(
             thread=thread,
             store=self.store,
@@ -380,7 +381,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             guardrail_results=result.input_guardrail_results,
         )
 
-        new_context = state.context.model_dump()
+        new_context = public_context(state.context)
         changes = {k: new_context[k] for k in new_context if previous_context.get(k) != new_context[k]}
         if changes:
             state.events.append(
@@ -411,7 +412,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         return {
             "thread_id": thread.id,
             "current_agent": state.current_agent_name,
-            "context": state.context.model_dump(),
+            "context": public_context(state.context),
             "agents": _build_agents_list(),
             "events": [e.model_dump() for e in state.events],
             "guardrails": [g.model_dump() for g in state.guardrails],

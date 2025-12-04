@@ -47,14 +47,10 @@ export function ChatKitPanel({
           label: "Flight status",
           prompt: "What's the status of flight FLT-123?",
         },
-        { label: "Cancellation", prompt: "I need to cancel my trip." },
         {
           label: "Delayed connection",
-          prompt: "I'm flying Paris to Austin via New York and PA441 is delayed—can you rebook me?",
-        },
-        {
-          label: "Missing baggage",
-          prompt: "I missed my connection and my bag is missing. Can you file a claim?",
+          prompt:
+            "I'm flying Paris to Austin via New York and PA441 is delayed—can you rebook me?",
         },
       ],
     },

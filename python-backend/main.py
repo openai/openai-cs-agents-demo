@@ -30,12 +30,14 @@ class AirlineAgentContext(BaseModel):
     seat_number: str | None = None
     flight_number: str | None = None
     account_number: str | None = None  # Account number associated with the customer
-    itinerary: list[dict[str, str]] | None = None
-    baggage_claim_id: str | None = None
+    itinerary: list[dict[str, str]] | None = None  # Internal only (not surfaced to UI)
+    baggage_claim_id: str | None = None  # Internal only (not surfaced to UI)
     compensation_case_id: str | None = None
     scenario: str | None = None
     vouchers: list[str] | None = None
     special_service_note: str | None = None
+    origin: str | None = None
+    destination: str | None = None
 
 
 class AirlineAgentChatContext(AgentContext[dict]):
@@ -124,12 +126,9 @@ MOCK_ITINERARIES = {
 def create_initial_context() -> AirlineAgentContext:
     """
     Factory for a new AirlineAgentContext.
-    For demo: generates a fake account number.
-    In production, this should be set from real user data.
+    Starts empty; values are populated during the conversation.
     """
     ctx = AirlineAgentContext()
-    ctx.account_number = str(random.randint(10000000, 99999999))
-    apply_itinerary_defaults(ctx)
     return ctx
 
 
@@ -146,9 +145,10 @@ def apply_itinerary_defaults(ctx: AirlineAgentContext, scenario_key: str | None 
     ctx.seat_number = ctx.seat_number or data.get("seat_number")
     if ctx.itinerary is None:
         ctx.itinerary = deepcopy(segments)
-    voucher_values = list(data.get("vouchers", {}).values())
-    if voucher_values and not ctx.vouchers:
-        ctx.vouchers = voucher_values
+    # Set trip endpoints for display without exposing the full itinerary
+    if segments:
+        ctx.origin = ctx.origin or segments[0].get("origin")
+        ctx.destination = ctx.destination or segments[-1].get("destination")
 
 
 def get_itinerary_for_flight(flight_number: str | None) -> tuple[str, dict] | None:
@@ -175,6 +175,27 @@ def active_itinerary(ctx: AirlineAgentContext) -> tuple[str, dict]:
         return match
     ctx.scenario = "disrupted"
     return ctx.scenario, MOCK_ITINERARIES["disrupted"]
+
+
+def public_context(ctx: AirlineAgentContext) -> dict:
+    """
+    Return a filtered view of the context for UI display.
+    Hides internal fields like itinerary and baggage_claim_id, and only shows vouchers when granted.
+    """
+    data = ctx.model_dump()
+    hidden_keys = {
+        "itinerary",
+        "baggage_claim_id",
+        "compensation_case_id",
+        "scenario",
+    }
+    for key in list(data.keys()):
+        if key in hidden_keys:
+            data.pop(key, None)
+    # Only surface vouchers once granted
+    if not data.get("vouchers"):
+        data.pop("vouchers", None)
+    return data
 
 # =========================
 # TOOLS

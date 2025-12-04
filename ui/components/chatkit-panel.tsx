@@ -3,6 +3,7 @@
 import { ChatKit, useChatKit } from "@openai/chatkit-react";
 
 type ChatKitPanelProps = {
+  initialThreadId?: string | null;
   onThreadChange?: (threadId: string | null) => void;
   onResponseEnd?: () => void;
 };
@@ -11,6 +12,7 @@ const CHATKIT_DOMAIN_KEY =
   process.env.NEXT_PUBLIC_CHATKIT_DOMAIN_KEY ?? "domain_pk_localhost_dev";
 
 export function ChatKitPanel({
+  initialThreadId,
   onThreadChange,
   onResponseEnd,
 }: ChatKitPanelProps) {
@@ -19,6 +21,7 @@ export function ChatKitPanel({
       url: "/chatkit",
       domainKey: CHATKIT_DOMAIN_KEY,
     },
+    initialThread: initialThreadId ?? null,
     startScreen: {
       greeting: "Hi! I'm your airline assistant. How can I help today?",
       prompts: [

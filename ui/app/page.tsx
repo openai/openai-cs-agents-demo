@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AgentPanel } from "@/components/agent-panel";
 import { ChatKitPanel } from "@/components/chatkit-panel";
 import type { Agent, AgentEvent, GuardrailCheck } from "@/lib/types";
-import { fetchThreadState } from "@/lib/api";
+import { fetchBootstrapState, fetchThreadState } from "@/lib/api";
 
 export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -13,6 +13,7 @@ export default function Home() {
   const [guardrails, setGuardrails] = useState<GuardrailCheck[]>([]);
   const [context, setContext] = useState<Record<string, any>>({});
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
 
   const hydrateState = useCallback(
     async (id: string | null) => {
@@ -49,6 +50,34 @@ export default function Home() {
     }
   }, [threadId, hydrateState]);
 
+  useEffect(() => {
+    (async () => {
+      const bootstrap = await fetchBootstrapState();
+      if (!bootstrap) return;
+      setInitialThreadId(bootstrap.thread_id || null);
+      setThreadId(bootstrap.thread_id || null);
+      if (bootstrap.current_agent) setCurrentAgent(bootstrap.current_agent);
+      if (Array.isArray(bootstrap.agents)) setAgents(bootstrap.agents);
+      if (bootstrap.context) setContext(bootstrap.context);
+      if (Array.isArray(bootstrap.events)) {
+        setEvents(
+          bootstrap.events.map((e: any) => ({
+            ...e,
+            timestamp: new Date(e.timestamp ?? Date.now()),
+          }))
+        );
+      }
+      if (Array.isArray(bootstrap.guardrails)) {
+        setGuardrails(
+          bootstrap.guardrails.map((g: any) => ({
+            ...g,
+            timestamp: new Date(g.timestamp ?? Date.now()),
+          }))
+        );
+      }
+    })();
+  }, []);
+
   const handleThreadChange = useCallback((id: string | null) => {
     setThreadId(id);
   }, []);
@@ -67,6 +96,7 @@ export default function Home() {
         context={context}
       />
       <ChatKitPanel
+        initialThreadId={initialThreadId}
         onThreadChange={handleThreadChange}
         onResponseEnd={handleResponseEnd}
       />

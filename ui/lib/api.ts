@@ -1,15 +1,22 @@
-// Helper to call the server
-export async function callChatAPI(message: string, conversationId: string) {
+// Fetch ChatKit thread state for the Agent panel
+export async function fetchThreadState(threadId: string) {
   try {
-    const res = await fetch("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, message }),
-    });
-    if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
+    const res = await fetch(`/chatkit/state?thread_id=${encodeURIComponent(threadId)}`);
+    if (!res.ok) throw new Error(`State API error: ${res.status}`);
     return res.json();
   } catch (err) {
-    console.error("Error sending message:", err);
+    console.error("Error fetching thread state:", err);
+    return null;
+  }
+}
+
+export async function fetchBootstrapState() {
+  try {
+    const res = await fetch(`/chatkit/bootstrap`);
+    if (!res.ok) throw new Error(`Bootstrap API error: ${res.status}`);
+    return res.json();
+  } catch (err) {
+    console.error("Error bootstrapping state:", err);
     return null;
   }
 }

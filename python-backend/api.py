@@ -4,6 +4,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+import asyncio
+import json
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
@@ -170,6 +172,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         self.store = MemoryStore()
         super().__init__(self.store)
         self._state: Dict[str, ConversationState] = {}
+        self._listeners: Dict[str, list[asyncio.Queue]] = {}
 
     def _state_for_thread(self, thread_id: str) -> ConversationState:
         if thread_id not in self._state:
@@ -327,6 +330,24 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             request_context=context,
             state=state.context,
         )
+        streamed_items_seen = 0
+        consumer_task: asyncio.Task | None = None
+
+        async def consume_run_events():
+            nonlocal streamed_items_seen
+            async for _ in result.stream_events():
+                new_items = result.new_items[streamed_items_seen:]
+                if new_items:
+                    new_events, active_agent = self._record_events(
+                        new_items, state.current_agent_name
+                    )
+                    state.events.extend(new_events)
+                    state.current_agent_name = active_agent
+                    streamed_items_seen += len(new_items)
+                    logger.info("Streaming state update: %s new_items, active_agent=%s", len(new_items), active_agent)
+                    await self._broadcast_state(thread, context)
+                else:
+                    logger.debug("Streaming event with no new_items yet.")
 
         try:
             result = Runner.run_streamed(
@@ -334,6 +355,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 state.input_items,
                 context=chat_context,
             )
+            consumer_task = asyncio.create_task(consume_run_events())
             async for event in stream_agent_response(chat_context, result):
                 yield event
         except InputGuardrailTripwireTriggered as exc:
@@ -365,9 +387,18 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 )
             )
             return
+        finally:
+            if consumer_task:
+                if not consumer_task.done():
+                    consumer_task.cancel()
+                try:
+                    await consumer_task
+                except asyncio.CancelledError:
+                    pass
 
         state.input_items = result.to_input_list()
-        new_events, active_agent = self._record_events(result.new_items, state.current_agent_name)
+        remaining_items = result.new_items[streamed_items_seen:]
+        new_events, active_agent = self._record_events(remaining_items, state.current_agent_name)
         state.events.extend(new_events)
         final_agent_name = active_agent
         try:
@@ -394,6 +425,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     timestamp=time.time() * 1000,
                 )
             )
+        await self._broadcast_state(thread, context)
 
     async def action(
         self,
@@ -417,6 +449,32 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             "events": [e.model_dump() for e in state.events],
             "guardrails": [g.model_dump() for g in state.guardrails],
         }
+
+    # -- Streaming state updates to UI listeners ---------------------------------
+    def _register_listener(self, thread_id: str) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue()
+        self._listeners.setdefault(thread_id, []).append(q)
+        return q
+
+    def _unregister_listener(self, thread_id: str, queue: asyncio.Queue) -> None:
+        listeners = self._listeners.get(thread_id, [])
+        if queue in listeners:
+            listeners.remove(queue)
+        if not listeners and thread_id in self._listeners:
+            self._listeners.pop(thread_id, None)
+
+    async def _broadcast_state(self, thread: ThreadMetadata, context: dict[str, Any]) -> None:
+        listeners = self._listeners.get(thread.id, [])
+        if not listeners:
+            return
+        snap = await self.snapshot(thread.id, context)
+        payload = json.dumps(snap, default=str)
+        logger.info("Broadcasting state to %s listeners for thread %s", len(listeners), thread.id)
+        for q in list(listeners):
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
 
 
 server = AirlineServer()
@@ -452,6 +510,31 @@ async def chatkit_bootstrap(
     server: AirlineServer = Depends(get_server),
 ) -> Dict[str, Any]:
     return await server.snapshot(None, {"request": None})
+
+
+@app.get("/chatkit/state/stream")
+async def chatkit_state_stream(
+    thread_id: str = Query(..., description="ChatKit thread identifier"),
+    server: AirlineServer = Depends(get_server),
+):
+    """
+    Server-Sent Events endpoint to push state updates (agents/events/guardrails/context) to the UI.
+    """
+    thread = await server._ensure_thread(thread_id, {"request": None})
+    queue = server._register_listener(thread.id)
+
+    async def event_generator():
+        try:
+            # send initial snapshot
+            initial = await server.snapshot(thread.id, {"request": None})
+            yield f"data: {json.dumps(initial, default=str)}\n\n"
+            while True:
+                data = await queue.get()
+                yield f"data: {data}\n\n"
+        finally:
+            server._unregister_listener(thread.id, queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/health")

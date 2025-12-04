@@ -86,6 +86,42 @@ export default function Home() {
     void hydrateState(threadId);
   }, [hydrateState, threadId]);
 
+  useEffect(() => {
+    if (!threadId) return;
+    const evtSource = new EventSource(`/chatkit/state/stream?thread_id=${threadId}`);
+    evtSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.current_agent) setCurrentAgent(data.current_agent);
+        if (Array.isArray(data.agents)) setAgents(data.agents);
+        if (data.context) setContext(data.context);
+        if (Array.isArray(data.events)) {
+          setEvents(
+            data.events.map((e: any) => ({
+              ...e,
+              timestamp: new Date(e.timestamp ?? Date.now()),
+            }))
+          );
+        }
+        if (Array.isArray(data.guardrails)) {
+          setGuardrails(
+            data.guardrails.map((g: any) => ({
+              ...g,
+              timestamp: new Date(g.timestamp ?? Date.now()),
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to parse SSE state event", err, event.data);
+      }
+    };
+    evtSource.onerror = (err) => {
+      console.error("SSE error", err);
+      evtSource.close();
+    };
+    return () => evtSource.close();
+  }, [threadId, hydrateState]);
+
   return (
     <main className="flex h-screen gap-2 bg-gray-100 p-2">
       <AgentPanel

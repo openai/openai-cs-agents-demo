@@ -38,7 +38,11 @@ function EventIcon({ type }: { type: string }) {
 
 const prettyValue = (value: any) => {
   if (value === null || value === undefined || value === "") return "null";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return String(value);
   }
   try {
@@ -142,42 +146,45 @@ function TimeBadge({ timestamp }: { timestamp: Date }) {
 export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
   return (
     <div className="flex-1 overflow-hidden">
-      <PanelSection title="Runner Output" icon={<MessageSquareMore className="h-4 w-4 text-blue-600" />}>
+      <PanelSection
+        title="Runner Output"
+        icon={<MessageSquareMore className="h-4 w-4 text-blue-600" />}
+      >
         <ScrollArea className="h-[calc(100%-2rem)] rounded-md border border-gray-200 bg-gray-100 shadow-sm">
-        <div className="p-4 space-y-3">
-          {runnerEvents.length === 0 ? (
-            <p className="text-center text-zinc-500 p-4">
-              No runner events yet
-            </p>
-          ) : (
-            runnerEvents.map((event) => (
-              <Card
-                key={event.id}
-                className="border border-gray-200 bg-white shadow-sm rounded-lg"
-              >
-                <CardHeader className="flex flex-row justify-between items-center p-4">
-                  <span className="font-medium text-gray-800 text-sm">
-                    {event.agent}
-                  </span>
-                  <TimeBadge timestamp={event.timestamp} />
-                </CardHeader>
+          <div className="p-4 space-y-3">
+            {runnerEvents.length === 0 ? (
+              <p className="text-center text-zinc-500 p-4">
+                No runner events yet
+              </p>
+            ) : (
+              runnerEvents.map((event) => (
+                <Card
+                  key={event.id}
+                  className="border border-gray-200 bg-white shadow-sm rounded-lg"
+                >
+                  <CardHeader className="flex flex-row justify-between items-center p-4">
+                    <span className="font-medium text-gray-800 text-sm">
+                      {event.agent}
+                    </span>
+                    <TimeBadge timestamp={event.timestamp} />
+                  </CardHeader>
 
-                <CardContent className="flex items-start gap-3 p-4">
-                  <div className="rounded-full p-2 bg-gray-100 flex items-center gap-2">
-                    <EventIcon type={event.type} />
-                    <div className="text-xs text-gray-600">
-                      {formatEventName(event.type)}
+                  <CardContent className="flex items-start gap-3 p-4">
+                    <div className="rounded-full p-2 bg-gray-100 flex items-center gap-2">
+                      <EventIcon type={event.type} />
+                      <div className="text-xs whitespace-nowrap text-gray-600">
+                        {formatEventName(event.type)}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex-1">
-                    <EventDetails event={event} />
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
+                    <div className="flex-1">
+                      <EventDetails event={event} />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
         </ScrollArea>
       </PanelSection>
     </div>

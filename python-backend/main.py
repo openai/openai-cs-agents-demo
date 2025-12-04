@@ -658,7 +658,7 @@ def seat_services_instructions(
     )
 
 seat_special_services_agent = Agent[AirlineAgentChatContext](
-    name="Seat & Special Services Agent",
+    name="Seat and Special Services Agent",
     model=MODEL,
     handoff_description="Updates seats and handles medical or special service seating.",
     instructions=seat_services_instructions,
@@ -729,7 +729,7 @@ def booking_cancellation_instructions(
     )
 
 booking_cancellation_agent = Agent[AirlineAgentChatContext](
-    name="Booking & Cancellation Agent",
+    name="Booking and Cancellation Agent",
     model=MODEL,
     handoff_description="Handles new bookings, rebookings after delays, and cancellations.",
     instructions=booking_cancellation_instructions,
@@ -747,15 +747,14 @@ def refunds_compensation_instructions(
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are the Refunds & Compensation Agent. You help customers understand and receive compensation after disruptions.\n"
         f"1. Work from confirmation {confirmation}. If missing, ask for it, then proceed.\n"
-        "2. If the customer experienced a delay or missed connection, summarize the issue and use issue_compensation to open a case and issue hotel/meal support. "
+        "2. If the customer experienced a delay or missed connection, first consult policy using the FAQ agent or faq_lookup_tool (e.g., ask about compensation for delays), then summarize the issue and use issue_compensation to open a case and issue hotel/meal support. "
         f"Current case id: {case_id}.\n"
-        "3. If the customer asks about eligibility or policy details, use the faq_lookup_tool for the answer before confirming the case.\n"
-        "4. Confirm what was issued and what receipts to keep. If they need baggage help, hand off to the Baggage Agent; otherwise return to Triage when done.\n"
-        "Operate autonomously: chain multiple tool calls in your turn without waiting for user input when sufficient data exists. Only emit one handoff per message (usually to Baggage if needed, else to Triage)."
+        "3. Confirm what was issued and what receipts to keep. If they need baggage help, hand off to the Baggage Agent; otherwise return to Triage when done.\n"
+        "Operate autonomously: chain multiple tool calls in your turn without waiting for user input when sufficient data exists. Only emit one handoff per message (usually to FAQ for policy if not consulted yet, then Baggage if needed, else Triage)."
     )
 
 refunds_compensation_agent = Agent[AirlineAgentChatContext](
-    name="Refunds & Compensation Agent",
+    name="Refunds and Compensation Agent",
     model=MODEL,
     handoff_description="Opens compensation cases and issues hotel/meal support after delays.",
     instructions=refunds_compensation_instructions,
@@ -809,8 +808,8 @@ triage_agent = Agent[AirlineAgentChatContext](
     instructions=(
         f"{RECOMMENDED_PROMPT_PREFIX} "
         "You are a helpful triaging agent. Route the customer to the best agent: "
-        "Flight Information for status/alternates, Booking & Cancellation for booking changes, Seat & Special Services for seating needs, "
-        "FAQ for policy questions, Refunds & Compensation for disruption support, and Baggage for missing bags."
+        "Flight Information for status/alternates, Booking and Cancellation for booking changes, Seat and Special Services for seating needs, "
+        "FAQ for policy questions, Refunds and Compensation for disruption support, and Baggage for missing bags."
         "First, if the message mentions Paris/New York/Austin and context is missing, call get_trip_details to populate flight/confirmation."
         "If the request is clear, hand off immediately and let the specialist complete multi-step work without asking the user to confirm after each tool call."
         "Never emit more than one handoff per message: do your prep (at most one tool call) and then hand off once."
@@ -843,5 +842,5 @@ booking_cancellation_agent.handoffs.extend(
         triage_agent,
     ]
 )
-refunds_compensation_agent.handoffs.append(triage_agent)
+refunds_compensation_agent.handoffs.extend([faq_agent, baggage_agent, triage_agent])
 baggage_agent.handoffs.extend([refunds_compensation_agent, triage_agent])

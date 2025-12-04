@@ -230,6 +230,30 @@ async def faq_lookup_tool(question: str) -> str:
         return "We have free wifi on the plane, join Airline-Wifi"
     return "I'm sorry, I don't know the answer to that question."
 
+@function_tool(
+    name_override="get_trip_details",
+    description_override="Infer the disrupted Paris->New York->Austin trip from user text and hydrate context.",
+)
+async def get_trip_details(
+    context: RunContextWrapper[AirlineAgentChatContext], message: str
+) -> str:
+    """
+    If the user mentions Paris, New York, or Austin, hydrate the context with the disrupted mock itinerary.
+    Returns the detected flight and confirmation.
+    """
+    text = message.lower()
+    keywords = ["paris", "new york", "austin"]
+    if any(k in text for k in keywords):
+        apply_itinerary_defaults(context.context.state, scenario_key="disrupted")
+        ctx = context.context.state
+        ctx.origin = ctx.origin or "Paris (CDG)"
+        ctx.destination = ctx.destination or "Austin (AUS)"
+        return (
+            f"Hydrated disrupted itinerary: flight {ctx.flight_number}, confirmation "
+            f"{ctx.confirmation_number}, origin {ctx.origin}, destination {ctx.destination}."
+        )
+    return "No matching itinerary detected."
+
 @function_tool
 async def update_seat(
     context: RunContextWrapper[AirlineAgentChatContext], confirmation_number: str, new_seat: str
@@ -613,10 +637,12 @@ def seat_services_instructions(
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are the Seat & Special Services Agent. Handle seat changes and medical/special service requests.\n"
         f"1. The customer's confirmation number is {confirmation} for flight {flight} and current seat {seat}. "
-        "If any of these are missing, ask to confirm. Record any special needs.\n"
+        "If any of these are missing, ask to confirm. If present, act without re-asking. Record any special needs.\n"
         "2. Offer to open the seat map or capture a specific seat. Use assign_special_service_seat for front row/medical requests, "
         "or update_seat for standard changes. If they want to choose visually, call display_seat_map.\n"
         "3. Confirm the new seat and remind the customer it is saved on their confirmation.\n"
+        "Important: if the request is clear and data is present, perform multiple tool calls in a single turn without waiting for user replies. "
+        "When done, emit at most one handoff: to Refunds & Compensation if disruption support is pending, to Baggage if baggage help is pending, otherwise back to Triage.\n"
         "If the request is unrelated to seats or special services, transfer back to the Triage Agent."
     )
 
@@ -639,10 +665,11 @@ def flight_information_instructions(
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are the Flight Information Agent. Provide status, connection risk, and quick options to keep trips on track.\n"
         f"1. The confirmation number is {confirmation} and the flight number is {flight}. "
-        "If either is missing, ask for it and then confirm with the customer.\n"
-        "2. Use flight_status_tool to share current status and note if delays will cause a missed connection.\n"
-        "3. If a delay or cancellation impacts the trip, use get_matching_flights to propose alternatives and hand off to the Booking & Cancellation Agent to secure the rebooking.\n"
-        "If the customer asks about other topics (baggage, refunds, etc.), transfer to the relevant agent."
+        "If either is missing, infer from context or ask once; do not block if you have hydrated data.\n"
+        "2. Use flight_status_tool immediately to share current status and note if delays will cause a missed connection.\n"
+        "3. If a delay or cancellation impacts the trip, call get_matching_flights to propose alternatives and then hand off to the Booking & Cancellation Agent to secure rebooking.\n"
+        "Work autonomously: chain multiple tool calls, then emit a single handoff (one per message) without pausing for user input when data is present."
+        "If the customer asks about other topics (baggage, refunds, etc.), transfer to the relevant agent with a single handoff."
     )
 
 flight_information_agent = Agent[AirlineAgentChatContext](
@@ -681,11 +708,13 @@ def booking_cancellation_instructions(
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are the Booking & Cancellation Agent. You can cancel, book, or rebook customers when plans change.\n"
-        f"1. Work from confirmation {confirmation} and flight {flight}. Ask the customer to confirm if anything is missing.\n"
+        f"1. Work from confirmation {confirmation} and flight {flight}. If these are present, proceed without asking; only ask if critical info is missing.\n"
         "2. If the customer needs a new flight, call get_matching_flights if options were not already shared, then use book_new_flight to secure the best match and auto-assign a seat.\n"
         "3. For cancellations, confirm details and use cancel_flight. If they have seat preferences after booking, hand off to the Seat & Special Services Agent.\n"
         "4. Summarize what changed and share the updated confirmation and seat assignment.\n"
-        "If the request is unrelated to booking or cancelling, transfer back to the Triage Agent."
+        "Execute autonomously: perform multiple tool calls in your turn without waiting for user responses when data is available. Only emit one handoff per message. "
+        "Preferred next handoff after rebooking: Seat & Special Services if a seat preference exists; otherwise Refunds & Compensation if disrupted; otherwise Baggage if bags are missing. "
+        "If none apply, return to the Triage Agent."
     )
 
 booking_cancellation_agent = Agent[AirlineAgentChatContext](
@@ -710,7 +739,8 @@ def refunds_compensation_instructions(
         "2. If the customer experienced a delay or missed connection, summarize the issue and use issue_compensation to open a case and issue hotel/meal support. "
         f"Current case id: {case_id}.\n"
         "3. If the customer asks about eligibility or policy details, use the faq_lookup_tool for the answer before confirming the case.\n"
-        "4. Confirm what was issued and what receipts to keep. If they need baggage help, hand off to the Baggage Agent; otherwise return to Triage when done."
+        "4. Confirm what was issued and what receipts to keep. If they need baggage help, hand off to the Baggage Agent; otherwise return to Triage when done.\n"
+        "Operate autonomously: chain multiple tool calls in your turn without waiting for user input when sufficient data exists. Only emit one handoff per message (usually to Baggage if needed, else to Triage)."
     )
 
 refunds_compensation_agent = Agent[AirlineAgentChatContext](
@@ -734,7 +764,8 @@ def baggage_agent_instructions(
         f"1. Work from confirmation {confirmation}. If the customer has a baggage tag or claim id, note it. Current claim id: {claim}.\n"
         "2. If the bag is missing or delayed, use file_baggage_claim to open a claim, then locate_baggage to share where the bag is and when it will be delivered. "
         "For policy/fee questions, use baggage_tool.\n"
-        "3. Summarize the plan for delivery. If the customer also needs compensation, hand off to the Refunds & Compensation Agent."
+        "3. Summarize the plan for delivery. If the customer also needs compensation, hand off to the Refunds & Compensation Agent.\n"
+        "Proceed autonomously: perform multiple tool calls during one turn without waiting for user responses when you have the data needed. Emit only one handoff per message."
     )
 
 baggage_agent = Agent[AirlineAgentChatContext](
@@ -769,7 +800,11 @@ triage_agent = Agent[AirlineAgentChatContext](
         "You are a helpful triaging agent. Route the customer to the best agent: "
         "Flight Information for status/alternates, Booking & Cancellation for booking changes, Seat & Special Services for seating needs, "
         "FAQ for policy questions, Refunds & Compensation for disruption support, and Baggage for missing bags."
+        "First, if the message mentions Paris/New York/Austin and context is missing, call get_trip_details to populate flight/confirmation."
+        "If the request is clear, hand off immediately and let the specialist complete multi-step work without asking the user to confirm after each tool call."
+        "Never emit more than one handoff per message: do your prep (at most one tool call) and then hand off once."
     ),
+    tools=[get_trip_details],
     handoffs=[
         flight_information_agent,
         handoff(agent=booking_cancellation_agent, on_handoff=on_booking_handoff),
@@ -783,7 +818,7 @@ triage_agent = Agent[AirlineAgentChatContext](
 
 # Set up handoff relationships
 faq_agent.handoffs.append(triage_agent)
-seat_special_services_agent.handoffs.append(triage_agent)
+seat_special_services_agent.handoffs.extend([refunds_compensation_agent, baggage_agent, triage_agent])
 flight_information_agent.handoffs.extend(
     [
         handoff(agent=booking_cancellation_agent, on_handoff=on_booking_handoff),

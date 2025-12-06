@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentPanel } from "@/components/agent-panel";
 import { ChatKitPanel } from "@/components/chatkit-panel";
 import type { Agent, AgentEvent, GuardrailCheck } from "@/lib/types";
@@ -14,35 +14,33 @@ export default function Home() {
   const [context, setContext] = useState<Record<string, any>>({});
   const [threadId, setThreadId] = useState<string | null>(null);
   const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
+  const prevEventCount = useRef(0);
 
-  const hydrateState = useCallback(
-    async (id: string | null) => {
-      if (!id) return;
-      const data = await fetchThreadState(id);
-      if (!data) return;
+  const hydrateState = useCallback(async (id: string | null) => {
+    if (!id) return;
+    const data = await fetchThreadState(id);
+    if (!data) return;
 
-      setCurrentAgent(data.current_agent || "");
-      setContext(data.context || {});
-      if (Array.isArray(data.agents)) setAgents(data.agents);
-      if (Array.isArray(data.events)) {
-        setEvents(
-          data.events.map((e: any) => ({
-            ...e,
-            timestamp: new Date(e.timestamp ?? Date.now()),
-          }))
-        );
-      }
-      if (Array.isArray(data.guardrails)) {
-        setGuardrails(
-          data.guardrails.map((g: any) => ({
-            ...g,
-            timestamp: new Date(g.timestamp ?? Date.now()),
-          }))
-        );
-      }
-    },
-    []
-  );
+    setCurrentAgent(data.current_agent || "");
+    setContext(data.context || {});
+    if (Array.isArray(data.agents)) setAgents(data.agents);
+    if (Array.isArray(data.events)) {
+      setEvents(
+        data.events.map((e: any) => ({
+          ...e,
+          timestamp: new Date(e.timestamp ?? Date.now()),
+        }))
+      );
+    }
+    if (Array.isArray(data.guardrails)) {
+      setGuardrails(
+        data.guardrails.map((g: any) => ({
+          ...g,
+          timestamp: new Date(g.timestamp ?? Date.now()),
+        }))
+      );
+    }
+  }, []);
 
   useEffect(() => {
     if (threadId) {
@@ -88,38 +86,74 @@ export default function Home() {
 
   useEffect(() => {
     if (!threadId) return;
-    const evtSource = new EventSource(`/chatkit/state/stream?thread_id=${threadId}`);
-    evtSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.current_agent) setCurrentAgent(data.current_agent);
-        if (Array.isArray(data.agents)) setAgents(data.agents);
-        if (data.context) setContext(data.context);
-        if (Array.isArray(data.events)) {
-          setEvents(
-            data.events.map((e: any) => ({
+    let cancelled = false;
+    const connect = () => {
+      if (cancelled) return;
+      const evtSource = new EventSource(
+        `/chatkit/state/stream?thread_id=${threadId}`
+      );
+      console.info("[SSE] Connecting to state stream", threadId);
+      evtSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.current_agent) setCurrentAgent(data.current_agent);
+          if (Array.isArray(data.agents)) setAgents(data.agents);
+          if (data.context) setContext(data.context);
+          if (Array.isArray(data.events_delta) && data.events_delta.length > 0) {
+            const mapped = data.events_delta.map((e: any) => ({
               ...e,
               timestamp: new Date(e.timestamp ?? Date.now()),
-            }))
-          );
-        }
-        if (Array.isArray(data.guardrails)) {
-          setGuardrails(
-            data.guardrails.map((g: any) => ({
-              ...g,
-              timestamp: new Date(g.timestamp ?? Date.now()),
-            }))
-          );
-        }
-      } catch (err) {
+            }));
+            setEvents((prev) => [...prev, ...mapped]);
+            const count = (prevEventCount.current || 0) + mapped.length;
+            console.info("[SSE] Streamed runner events", {
+              total: count,
+              new: mapped.length,
+            });
+            prevEventCount.current = count;
+          } else if (Array.isArray(data.events)) {
+            setEvents(
+              data.events.map((e: any) => ({
+                ...e,
+                timestamp: new Date(e.timestamp ?? Date.now()),
+              }))
+            );
+            const count = data.events.length;
+            if (count !== prevEventCount.current) {
+              console.info("[SSE] Streamed runner events", {
+                total: count,
+                new: Math.max(count - prevEventCount.current, 0),
+              });
+              prevEventCount.current = count;
+            }
+          }
+          if (Array.isArray(data.guardrails)) {
+            setGuardrails(
+              data.guardrails.map((g: any) => ({
+                ...g,
+                timestamp: new Date(g.timestamp ?? Date.now()),
+              }))
+            );
+          }
+        } catch (err) {
         console.error("Failed to parse SSE state event", err, event.data);
       }
     };
     evtSource.onerror = (err) => {
-      console.error("SSE error", err);
-      evtSource.close();
+      console.error("[SSE] error", err);
+        evtSource.close();
+        if (!cancelled) {
+          setTimeout(connect, 1000);
+        }
+      };
+      return evtSource;
     };
-    return () => evtSource.close();
+    const source = connect();
+    return () => {
+      cancelled = true;
+      console.info("[SSE] Disconnected", threadId);
+      source?.close();
+    };
   }, [threadId, hydrateState]);
 
   return (

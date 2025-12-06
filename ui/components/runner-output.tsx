@@ -9,6 +9,7 @@ import {
   WrenchIcon,
   RefreshCw,
   MessageSquareMore,
+  Loader2,
 } from "lucide-react";
 import { PanelSection } from "./panel-section";
 
@@ -17,10 +18,10 @@ interface RunnerOutputProps {
 }
 
 function formatEventName(type: string) {
-  return (type.charAt(0).toUpperCase() + type.slice(1)).replace("_", " ");
+  return (type.charAt(0).toUpperCase() + type.slice(1)).replace(/_/g, " ");
 }
 
-function EventIcon({ type }: { type: string }) {
+function EventIcon({ type, icon }: { type: string; icon?: string }) {
   const className = "h-4 w-4 text-zinc-600";
   switch (type) {
     case "handoff":
@@ -31,6 +32,8 @@ function EventIcon({ type }: { type: string }) {
       return <WrenchIcon className={className} />;
     case "context_update":
       return <RefreshCw className={className} />;
+    case "progress_update":
+      return <Loader2 className={`${className} animate-spin`} aria-label={icon ?? "Progress"} />;
     default:
       return null;
   }
@@ -109,6 +112,21 @@ function EventDetails({ event }: { event: AgentEvent }) {
         </div>
       );
       break;
+    case "progress_update":
+      details = (
+        <div className={className}>
+          <div className="text-gray-600 text-xs">
+            {event.metadata?.icon ? (
+              <span className="font-medium text-zinc-600">
+                {event.metadata.icon}
+              </span>
+            ) : (
+              "In progress"
+            )}
+          </div>
+        </div>
+      );
+      break;
     default:
       return null;
   }
@@ -171,7 +189,7 @@ export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
 
                   <CardContent className="flex items-start gap-3 p-4">
                     <div className="rounded-full p-2 bg-gray-100 flex items-center gap-2">
-                      <EventIcon type={event.type} />
+                      <EventIcon type={event.type} icon={event.metadata?.icon} />
                       <div className="text-xs whitespace-nowrap text-gray-600">
                         {formatEventName(event.type)}
                       </div>

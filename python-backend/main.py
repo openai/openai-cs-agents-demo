@@ -17,9 +17,11 @@ from agents import (
     input_guardrail,
 )
 from chatkit.agents import AgentContext
+from chatkit.types import ProgressUpdateEvent
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 MODEL = "robin-alpha-next-2025-11-24"
+#MODEL = "gpt-4.1"
 GUARDRAIL_MODEL = "gpt-4.1-mini"
 
 # =========================
@@ -284,6 +286,7 @@ async def flight_status_tool(
     context: RunContextWrapper[AirlineAgentChatContext], flight_number: str
 ) -> str:
     """Lookup the status for a flight using mock itineraries."""
+    await context.context.stream(ProgressUpdateEvent(text=f"Checking status for {flight_number}..."))
     ctx_state = context.context.state
     ctx_state.flight_number = flight_number
     match = get_itinerary_for_flight(flight_number)
@@ -308,6 +311,9 @@ async def flight_status_tool(
                 details.append(f"Scheduled {segment['departure']} -> {segment['arrival']}")
             if scenario_key == "disrupted" and segment.get("flight_number") == "PA441":
                 details.append("This delay will cause a missed connection to NY802. Reaccommodation is recommended.")
+            await context.context.stream(
+                ProgressUpdateEvent(text=f"Found status for flight {flight_number}")
+            )
             return " | ".join(details)
         replacement = next(
             (
@@ -320,10 +326,14 @@ async def flight_status_tool(
         if replacement:
             route = f"{replacement.get('origin', 'Unknown')} to {replacement.get('destination', 'Unknown')}"
             seat = replacement.get("seat", "auto-assign")
+            await context.context.stream(
+                ProgressUpdateEvent(text=f"Found alternate flight {flight_number}")
+            )
             return (
                 f"Replacement flight {flight_number} ({route}) is available. "
                 f"Departure {replacement.get('departure')} arriving {replacement.get('arrival')}. Seat {seat} held."
             )
+    await context.context.stream(ProgressUpdateEvent(text=f"No disruptions found for {flight_number}"))
     return f"Flight {flight_number} is on time and scheduled to depart at gate A10."
 
 @function_tool(
@@ -351,11 +361,13 @@ async def get_matching_flights(
     destination: str | None = None,
 ) -> str:
     """Return mock matching flights for a disrupted itinerary."""
+    await context.context.stream(ProgressUpdateEvent(text="Scanning for matching flights..."))
     ctx_state = context.context.state
     scenario_key, itinerary = active_itinerary(ctx_state)
     apply_itinerary_defaults(ctx_state, scenario_key=scenario_key)
     options = itinerary.get("rebook_options", [])
     if not options:
+        await context.context.stream(ProgressUpdateEvent(text="No alternates needed — trip on time"))
         return "All flights are operating on time. No alternate flights are needed."
     filtered = [
         opt
@@ -364,6 +376,9 @@ async def get_matching_flights(
         and (destination is None or destination.lower() in opt.get("destination", "").lower())
     ]
     final_options = filtered or options
+    await context.context.stream(
+        ProgressUpdateEvent(text=f"Found {len(final_options)} matching flight option(s)")
+    )
     lines = []
     for opt in final_options:
         lines.append(
@@ -383,6 +398,7 @@ async def book_new_flight(
     context: RunContextWrapper[AirlineAgentChatContext], flight_number: str | None = None
 ) -> str:
     """Book a replacement flight using mock inventory and update context."""
+    await context.context.stream(ProgressUpdateEvent(text="Booking replacement flight..."))
     ctx_state = context.context.state
     scenario_key, itinerary = active_itinerary(ctx_state)
     apply_itinerary_defaults(ctx_state, scenario_key=scenario_key)
@@ -401,6 +417,7 @@ async def book_new_flight(
             random.choices(string.ascii_uppercase + string.digits, k=6)
         )
         ctx_state.confirmation_number = confirmation
+        await context.context.stream(ProgressUpdateEvent(text="Booked placeholder flight"))
         return (
             f"Booked flight {flight_number or 'TBD'} with confirmation {confirmation}. "
             f"Seat assignment: {seat}."
@@ -427,12 +444,17 @@ async def book_new_flight(
             "status": "Confirmed replacement flight",
             "gate": "TBD",
         }
-    )
+        )
     ctx_state.itinerary = updated_itinerary
     confirmation = ctx_state.confirmation_number or "".join(
         random.choices(string.ascii_uppercase + string.digits, k=6)
     )
     ctx_state.confirmation_number = confirmation
+    await context.context.stream(
+        ProgressUpdateEvent(
+            text=f"Rebooked to {selection['flight_number']} with seat {ctx_state.seat_number}",
+        )
+    )
     return (
         f"Rebooked to {selection['flight_number']} from {selection.get('origin')} to {selection.get('destination')}. "
         f"Departure {selection.get('departure')}, arrival {selection.get('arrival')} (next day arrival in Austin). "
@@ -462,51 +484,6 @@ async def assign_special_service_seat(
     )
 
 @function_tool(
-    name_override="file_baggage_claim",
-    description_override="File a baggage claim for delayed or missing baggage."
-)
-async def file_baggage_claim(
-    context: RunContextWrapper[AirlineAgentChatContext], description: str = "Missing bag after misconnect"
-) -> str:
-    """Create a baggage claim and store the claim id in context."""
-    ctx_state = context.context.state
-    scenario_key, itinerary = active_itinerary(ctx_state)
-    apply_itinerary_defaults(ctx_state, scenario_key=scenario_key)
-    baggage_tag = itinerary.get("baggage_tag") or f"BG{random.randint(10000, 99999)}"
-    claim_id = ctx_state.baggage_claim_id or f"CLAIM-{random.randint(1000, 9999)}"
-    ctx_state.baggage_claim_id = claim_id
-    final_segment = itinerary.get("segments", [])[-1] if itinerary.get("segments") else {}
-    destination = final_segment.get("destination", "the destination city")
-    return (
-        f"Baggage claim {claim_id} filed for tag {baggage_tag}. "
-        f"Details noted: {description}. "
-        f"We will forward the bag to {destination} and deliver it once located."
-    )
-
-@function_tool(
-    name_override="locate_baggage",
-    description_override="Locate a missing bag using a claim ID or baggage tag."
-)
-async def locate_baggage(
-    context: RunContextWrapper[AirlineAgentChatContext], claim_id: str | None = None
-) -> str:
-    """Return a mock location update for a baggage claim."""
-    ctx_state = context.context.state
-    scenario_key, itinerary = active_itinerary(ctx_state)
-    apply_itinerary_defaults(ctx_state, scenario_key=scenario_key)
-    active_claim = claim_id or ctx_state.baggage_claim_id or f"CLAIM-{random.randint(2000, 9999)}"
-    ctx_state.baggage_claim_id = active_claim
-    forward_flight = None
-    if itinerary.get("rebook_options"):
-        forward_flight = itinerary["rebook_options"][0].get("flight_number")
-    elif itinerary.get("segments"):
-        forward_flight = itinerary["segments"][-1].get("flight_number")
-    return (
-        f"Claim {active_claim}: Bag located at JFK baggage services and tagged to travel on "
-        f"{forward_flight or 'the next available flight'} to Austin. Delivery scheduled for tomorrow morning at the hotel."
-    )
-
-@function_tool(
     name_override="issue_compensation",
     description_override="Create a compensation case and issue hotel/meal vouchers."
 )
@@ -514,6 +491,7 @@ async def issue_compensation(
     context: RunContextWrapper[AirlineAgentChatContext], reason: str = "Delay causing missed connection"
 ) -> str:
     """Open a compensation case and attach vouchers."""
+    await context.context.stream(ProgressUpdateEvent(text="Opening compensation case..."))
     ctx_state = context.context.state
     scenario_key, itinerary = active_itinerary(ctx_state)
     apply_itinerary_defaults(ctx_state, scenario_key=scenario_key)
@@ -525,6 +503,7 @@ async def issue_compensation(
     else:
         ctx_state.vouchers = ctx_state.vouchers or []
     vouchers_text = "; ".join(ctx_state.vouchers) if ctx_state.vouchers else "Documented compensation with no vouchers required."
+    await context.context.stream(ProgressUpdateEvent(text=f"Issued vouchers for case {case_id}"))
     return (
         f"Opened compensation case {case_id} for: {reason}. "
         f"Issued: {vouchers_text}. Keep receipts for any hotel or meal costs and attach them to this case."
@@ -762,31 +741,6 @@ refunds_compensation_agent = Agent[AirlineAgentChatContext](
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
-def baggage_agent_instructions(
-    run_context: RunContextWrapper[AirlineAgentChatContext], agent: Agent[AirlineAgentChatContext]
-) -> str:
-    ctx = run_context.context.state
-    confirmation = ctx.confirmation_number or "[unknown]"
-    claim = ctx.baggage_claim_id or "[not filed]"
-    return (
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Baggage Agent. File claims and locate missing baggage.\n"
-        f"1. Work from confirmation {confirmation}. If the customer has a baggage tag or claim id, note it. Current claim id: {claim}.\n"
-        "2. If the bag is missing or delayed, use file_baggage_claim to open a claim, then locate_baggage to share where the bag is and when it will be delivered. "
-        "For policy/fee questions, use baggage_tool.\n"
-        "3. Summarize the plan for delivery. If the customer also needs compensation, hand off to the Refunds & Compensation Agent.\n"
-        "Proceed autonomously: perform multiple tool calls during one turn without waiting for user responses when you have the data needed. Emit only one handoff per message."
-    )
-
-baggage_agent = Agent[AirlineAgentChatContext](
-    name="Baggage Agent",
-    model=MODEL,
-    handoff_description="Files baggage claims and tracks missing bags.",
-    instructions=baggage_agent_instructions,
-    tools=[file_baggage_claim, locate_baggage, baggage_tool],
-    input_guardrails=[relevance_guardrail, jailbreak_guardrail],
-)
-
 faq_agent = Agent[AirlineAgentChatContext](
     name="FAQ Agent",
     model=MODEL,
@@ -809,7 +763,7 @@ triage_agent = Agent[AirlineAgentChatContext](
         f"{RECOMMENDED_PROMPT_PREFIX} "
         "You are a helpful triaging agent. Route the customer to the best agent: "
         "Flight Information for status/alternates, Booking and Cancellation for booking changes, Seat and Special Services for seating needs, "
-        "FAQ for policy questions, Refunds and Compensation for disruption support, and Baggage for missing bags."
+        "FAQ for policy questions, and Refunds and Compensation for disruption support."
         "First, if the message mentions Paris/New York/Austin and context is missing, call get_trip_details to populate flight/confirmation."
         "If the request is clear, hand off immediately and let the specialist complete multi-step work without asking the user to confirm after each tool call."
         "Never emit more than one handoff per message: do your prep (at most one tool call) and then hand off once."
@@ -821,14 +775,13 @@ triage_agent = Agent[AirlineAgentChatContext](
         handoff(agent=seat_special_services_agent, on_handoff=on_seat_booking_handoff),
         faq_agent,
         refunds_compensation_agent,
-        baggage_agent,
     ],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
 # Set up handoff relationships
 faq_agent.handoffs.append(triage_agent)
-seat_special_services_agent.handoffs.extend([refunds_compensation_agent, baggage_agent, triage_agent])
+seat_special_services_agent.handoffs.extend([refunds_compensation_agent, triage_agent])
 flight_information_agent.handoffs.extend(
     [
         handoff(agent=booking_cancellation_agent, on_handoff=on_booking_handoff),
@@ -842,5 +795,4 @@ booking_cancellation_agent.handoffs.extend(
         triage_agent,
     ]
 )
-refunds_compensation_agent.handoffs.extend([faq_agent, baggage_agent, triage_agent])
-baggage_agent.handoffs.extend([refunds_compensation_agent, triage_agent])
+refunds_compensation_agent.handoffs.extend([faq_agent, triage_agent])

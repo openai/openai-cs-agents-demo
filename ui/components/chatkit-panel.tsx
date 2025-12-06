@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatKit, useChatKit } from "@openai/chatkit-react";
+import React from "react";
 
 type ChatKitPanelProps = {
   initialThreadId?: string | null;

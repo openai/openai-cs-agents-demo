@@ -15,7 +15,13 @@ export interface Agent {
   input_guardrails: string[]
 }
 
-export type EventType = "message" | "handoff" | "tool_call" | "tool_output" | "context_update"
+export type EventType =
+  | "message"
+  | "handoff"
+  | "tool_call"
+  | "tool_output"
+  | "context_update"
+  | "progress_update"
 
 export interface AgentEvent {
   id: string
@@ -32,6 +38,7 @@ export interface AgentEvent {
     context_key?: string
     context_value?: any
     changes?: Record<string, any>
+    icon?: string
   }
 }
 
@@ -43,4 +50,3 @@ export interface GuardrailCheck {
   passed: boolean
   timestamp: Date
 }
-

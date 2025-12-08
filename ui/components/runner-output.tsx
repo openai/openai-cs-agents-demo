@@ -1,7 +1,6 @@
 "use client";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import type { AgentEvent } from "@/lib/types";
 import {
   ArrowRightLeft,
@@ -9,8 +8,9 @@ import {
   WrenchIcon,
   RefreshCw,
   MessageSquareMore,
-  Loader2,
+  ChevronDown,
 } from "lucide-react";
+import { useState } from "react";
 import { PanelSection } from "./panel-section";
 
 interface RunnerOutputProps {
@@ -37,114 +37,112 @@ function EventIcon({ type, icon }: { type: string; icon?: string }) {
   }
 }
 
-const prettyValue = (value: any) => {
+function inlineValue(value: any) {
   if (value === null || value === undefined || value === "") return "null";
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(value);
   } catch {
     return "object";
   }
-};
+}
 
-function EventDetails({ event }: { event: AgentEvent }) {
-  let details = null;
-  const className =
-    "border border-gray-100 text-xs p-2.5 rounded-md flex flex-col gap-2";
+function groupRunnerEvents(events: AgentEvent[]) {
+  const groups: AgentEvent[][] = [];
+  for (let i = 0; i < events.length; i++) {
+    const current = events[i];
+    if (current.type === "tool_call") {
+      const group = [current];
+      let j = i + 1;
+      while (
+        j < events.length &&
+        events[j].type === "tool_output" &&
+        events[j].agent === current.agent
+      ) {
+        group.push(events[j]);
+        j++;
+      }
+      groups.push(group);
+      i = j - 1;
+      continue;
+    }
+    groups.push([current]);
+  }
+  return groups;
+}
+
+function buildEventText(event: AgentEvent) {
   switch (event.type) {
     case "handoff":
-      details = event.metadata && (
-        <div className={className}>
-          <div className="text-gray-600">
-            <span className="text-zinc-600 font-medium">From:</span>{" "}
-            {event.metadata.source_agent}
-          </div>
-          <div className="text-gray-600">
-            <span className="text-zinc-600 font-medium">To:</span>{" "}
-            {event.metadata.target_agent}
-          </div>
-        </div>
-      );
-      break;
-    case "tool_call":
-      details = event.metadata && event.metadata.tool_args && (
-        <div className={className}>
-          <div className="text-xs text-zinc-600 mb-1 font-medium">
-            Arguments
-          </div>
-          <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto">
-            {JSON.stringify(event.metadata.tool_args, null, 2)}
-          </pre>
-        </div>
-      );
-      break;
-    case "tool_output":
-      details = event.metadata && event.metadata.tool_result && (
-        <div className={className}>
-          <div className="text-xs text-zinc-600 mb-1 font-medium">Result</div>
-          <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto">
-            {JSON.stringify(event.metadata.tool_result, null, 2)}
-          </pre>
-        </div>
-      );
-      break;
-    case "context_update":
-      details = event.metadata?.changes && (
-        <div className={className}>
-          {Object.entries(event.metadata.changes).map(([key, value]) => (
-            <div key={key} className="text-xs">
-              <div className="text-gray-600 flex flex-col gap-1">
-                <span className="text-zinc-600 font-medium">{key}:</span>
-                <pre className="bg-gray-50 text-gray-700 p-2 rounded border border-gray-200 overflow-auto max-h-32">
-                  {prettyValue(value)}
-                </pre>
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-      break;
+      return event.content || `${event.metadata?.source_agent ?? ""} -> ${event.metadata?.target_agent ?? ""}`.trim();
+    case "tool_call": {
+      const args = event.metadata?.tool_args;
+      const argsText = args !== undefined ? ` - ${inlineValue(args)}` : "";
+      return `${event.content || "Tool call"}${argsText}`;
+    }
+    case "tool_output": {
+      const result = event.metadata?.tool_result;
+      if (result !== undefined) return inlineValue(result);
+      return event.content || "Tool output";
+    }
+    case "context_update": {
+      const changes = event.metadata?.changes;
+      if (!changes) return event.content || "";
+      return Object.entries(changes)
+        .map(([key, value]) => `${key}: ${inlineValue(value)}`)
+        .join(" · ");
+    }
     default:
-      return null;
+      return event.content || "";
   }
+}
+
+function EventDetails({ event }: { event: AgentEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = buildEventText(event);
+  const clampStyle = !expanded
+    ? { display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" as const }
+    : undefined;
 
   return (
-    <div className="mt-1 text-sm">
-      {event.content && (
-        <div className="text-gray-700 font-mono mb-2">{event.content}</div>
-      )}
-      {details}
+    <div className="flex items-start gap-2">
+      <div className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-600 shrink-0">
+        <EventIcon type={event.type} icon={event.metadata?.icon} />
+        <span className="whitespace-nowrap">{formatEventName(event.type)}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        className="group flex-1 min-w-0 text-left flex items-start gap-2"
+      >
+        <div
+          className={`flex-1 overflow-hidden transition-[max-height] duration-200 ease-out ${
+            expanded ? "max-h-[420px]" : "max-h-6"
+          }`}
+        >
+          <div
+            style={clampStyle}
+            className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap"
+          >
+            {text}
+          </div>
+        </div>
+        <ChevronDown
+          className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform duration-200 group-hover:text-gray-600 ${
+            expanded ? "rotate-180" : ""
+          }`}
+        />
+      </button>
     </div>
   );
 }
 
-function TimeBadge({ timestamp }: { timestamp: Date }) {
-  const date =
-    timestamp && typeof (timestamp as any)?.toDate === "function"
-      ? (timestamp as any).toDate()
-      : timestamp;
-  const formattedDate = new Date(date).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  return (
-    <Badge
-      variant="outline"
-      className="text-[10px] h-5 bg-white text-zinc-500 border-gray-200"
-    >
-      {formattedDate}
-    </Badge>
-  );
-}
-
 export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
+  const groupedEvents = groupRunnerEvents(runnerEvents);
+
   return (
     <div className="flex-1 overflow-hidden">
       <PanelSection
@@ -152,38 +150,32 @@ export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
         icon={<MessageSquareMore className="h-4 w-4 text-blue-600" />}
       >
         <ScrollArea className="h-[calc(100%-2rem)] rounded-md border border-gray-200 bg-gray-100 shadow-sm">
-          <div className="p-4 space-y-3">
+          <div className="p-3 space-y-2.5">
             {runnerEvents.length === 0 ? (
               <p className="text-center text-zinc-500 p-4">
                 No runner events yet
               </p>
             ) : (
-              runnerEvents.map((event) => (
-                <Card
-                  key={event.id}
-                  className="border border-gray-200 bg-white shadow-sm rounded-lg"
-                >
-                  <CardHeader className="flex flex-row justify-between items-center p-4">
-                    <span className="font-medium text-gray-800 text-sm">
-                      {event.agent}
-                    </span>
-                    <TimeBadge timestamp={event.timestamp} />
-                  </CardHeader>
+              groupedEvents.map((group) => {
+                const agentName = group[0]?.agent ?? "Agent";
+                const key = group.map((ev) => ev.id).join("-");
+                return (
+                  <Card
+                    key={key}
+                    className="border border-gray-200 bg-white shadow-sm rounded-lg"
+                  >
+                    <CardHeader className="flex flex-row items-center px-3 py-2">
+                      <span className="text-sm text-gray-800 font-medium">{agentName}</span>
+                    </CardHeader>
 
-                  <CardContent className="flex items-start gap-3 p-4">
-                    <div className="rounded-full p-2 bg-gray-100 flex items-center gap-2">
-                      <EventIcon type={event.type} icon={event.metadata?.icon} />
-                      <div className="text-xs whitespace-nowrap text-gray-600">
-                        {formatEventName(event.type)}
-                      </div>
-                    </div>
-
-                    <div className="flex-1">
-                      <EventDetails event={event} />
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+                    <CardContent className="p-3 pt-0 space-y-2">
+                      {group.map((event) => (
+                        <EventDetails key={event.id} event={event} />
+                      ))}
+                    </CardContent>
+                  </Card>
+                );
+              })
             )}
           </div>
         </ScrollArea>

@@ -7,6 +7,9 @@ type ChatKitPanelProps = {
   initialThreadId?: string | null;
   onThreadChange?: (threadId: string | null) => void;
   onResponseEnd?: () => void;
+  onRunnerUpdate?: () => void;
+  onRunnerEventDelta?: (events: any[]) => void;
+  onRunnerBindThread?: (threadId: string) => void;
 };
 
 const CHATKIT_DOMAIN_KEY =
@@ -16,6 +19,9 @@ export function ChatKitPanel({
   initialThreadId,
   onThreadChange,
   onResponseEnd,
+  onRunnerUpdate,
+  onRunnerEventDelta,
+  onRunnerBindThread,
 }: ChatKitPanelProps) {
   const chatkit = useChatKit({
     api: {
@@ -63,6 +69,21 @@ export function ChatKitPanel({
     onError: ({ error }) => {
       console.error("ChatKit error", error);
     },
+    onEffect: async ({ name }) => {
+      if (name === "runner_state_update") {
+        onRunnerUpdate?.();
+      }
+      if (name === "runner_event_delta") {
+        // runner_event_delta includes events payload in the effect data
+        onRunnerEventDelta?.((arguments as any)?.[0]?.data?.events ?? []);
+      }
+       if (name === "runner_bind_thread") {
+        const tid = (arguments as any)?.[0]?.data?.thread_id;
+        if (tid) {
+          onRunnerBindThread?.(tid);
+        }
+      }
+    },
   });
 
   return (
@@ -77,6 +98,11 @@ export function ChatKitPanel({
           control={chatkit.control}
           className="block h-full w-full"
           style={{ height: "100%", width: "100%" }}
+          onThreadChange={(e: any) =>
+            console.info("[ChatKit component thread change]", e?.detail ?? e)
+          }
+          onResponseStart={() => console.info("[ChatKit component response start]", Date.now())}
+          onResponseEnd={() => console.info("[ChatKit component response end]", Date.now())}
         />
       </div>
     </div>

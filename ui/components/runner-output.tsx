@@ -32,8 +32,6 @@ function EventIcon({ type, icon }: { type: string; icon?: string }) {
       return <WrenchIcon className={className} />;
     case "context_update":
       return <RefreshCw className={className} />;
-    case "progress_update":
-      return <Loader2 className={`${className} animate-spin`} aria-label={icon ?? "Progress"} />;
     default:
       return null;
   }
@@ -109,21 +107,6 @@ function EventDetails({ event }: { event: AgentEvent }) {
               </div>
             </div>
           ))}
-        </div>
-      );
-      break;
-    case "progress_update":
-      details = (
-        <div className={className}>
-          <div className="text-gray-600 text-xs">
-            {event.metadata?.icon ? (
-              <span className="font-medium text-zinc-600">
-                {event.metadata.icon}
-              </span>
-            ) : (
-              "In progress"
-            )}
-          </div>
         </div>
       );
       break;

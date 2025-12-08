@@ -23,7 +23,9 @@ export function AgentPanel({
   context,
 }: AgentPanelProps) {
   const activeAgent = agents.find((a) => a.name === currentAgent);
-  const runnerEvents = events.filter((e) => e.type !== "message");
+  const runnerEvents = events.filter(
+    (e) => e.type !== "message" && e.type !== "progress_update"
+  );
 
   return (
     <div className="w-3/5 h-full flex flex-col border-r border-gray-200 bg-white rounded-xl shadow-sm">

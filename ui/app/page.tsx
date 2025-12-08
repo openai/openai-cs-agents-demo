@@ -16,6 +16,23 @@ export default function Home() {
   const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
   const prevEventCount = useRef(0);
 
+  const normalizeEvents = useCallback((items: AgentEvent[]) => {
+    if (!items.length) return items;
+    const now = Date.now();
+    const latestNonProgress = items
+      .filter((e) => e.type !== "progress_update")
+      .reduce((max, e) => Math.max(max, e.timestamp.getTime()), 0);
+    const pruned = items.filter((e) => {
+      if (e.type !== "progress_update") return true;
+      const ts = e.timestamp.getTime();
+      // Drop old progress once a newer non-progress exists, or after 15s
+      if (latestNonProgress && ts < latestNonProgress) return false;
+      if (now - ts > 15000) return false;
+      return true;
+    });
+    return pruned;
+  }, []);
+
   const hydrateState = useCallback(async (id: string | null) => {
     if (!id) return;
     const data = await fetchThreadState(id);
@@ -59,10 +76,12 @@ export default function Home() {
       if (bootstrap.context) setContext(bootstrap.context);
       if (Array.isArray(bootstrap.events)) {
         setEvents(
-          bootstrap.events.map((e: any) => ({
-            ...e,
-            timestamp: new Date(e.timestamp ?? Date.now()),
-          }))
+          normalizeEvents(
+            bootstrap.events.map((e: any) => ({
+              ...e,
+              timestamp: new Date(e.timestamp ?? Date.now()),
+            }))
+          )
         );
       }
       if (Array.isArray(bootstrap.guardrails)) {
@@ -77,12 +96,45 @@ export default function Home() {
   }, []);
 
   const handleThreadChange = useCallback((id: string | null) => {
+    console.info("[App] thread change", id, "at", new Date().toISOString());
+    setThreadId(id);
+  }, []);
+
+  const handleBindThread = useCallback((id: string) => {
+    console.info("[Runner] bind thread from effect", id, "at", new Date().toISOString());
     setThreadId(id);
   }, []);
 
   const handleResponseEnd = useCallback(() => {
     void hydrateState(threadId);
   }, [hydrateState, threadId]);
+
+  const handleRunnerUpdate = useCallback(() => {
+    if (threadId) {
+      console.info("[Runner] refresh on client effect", new Date().toISOString());
+      void hydrateState(threadId);
+    }
+  }, [hydrateState, threadId]);
+
+  const handleRunnerEventDelta = useCallback(
+    (newEvents: any[]) => {
+      if (!newEvents?.length) return;
+      console.info("[Runner] delta received via client effect", {
+        count: newEvents.length,
+        ts: new Date().toISOString(),
+      });
+      setEvents((prev) =>
+        normalizeEvents([
+          ...prev,
+          ...newEvents.map((e: any) => ({
+            ...e,
+            timestamp: new Date(e.timestamp ?? Date.now()),
+          })),
+        ])
+      );
+    },
+    [normalizeEvents]
+  );
 
   useEffect(() => {
     if (!threadId) return;
@@ -96,6 +148,16 @@ export default function Home() {
       evtSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          const now = new Date().toISOString();
+          const deltaCount = Array.isArray(data.events_delta)
+            ? data.events_delta.length
+            : 0;
+          console.info("[SSE] received", {
+            now,
+            deltaCount,
+            totalEvents: data.events?.length ?? "n/a",
+            thread: threadId,
+          });
           if (data.current_agent) setCurrentAgent(data.current_agent);
           if (Array.isArray(data.agents)) setAgents(data.agents);
           if (data.context) setContext(data.context);
@@ -104,7 +166,7 @@ export default function Home() {
               ...e,
               timestamp: new Date(e.timestamp ?? Date.now()),
             }));
-            setEvents((prev) => [...prev, ...mapped]);
+            setEvents((prev) => normalizeEvents([...prev, ...mapped]));
             const count = (prevEventCount.current || 0) + mapped.length;
             console.info("[SSE] Streamed runner events", {
               total: count,
@@ -113,10 +175,12 @@ export default function Home() {
             prevEventCount.current = count;
           } else if (Array.isArray(data.events)) {
             setEvents(
-              data.events.map((e: any) => ({
-                ...e,
-                timestamp: new Date(e.timestamp ?? Date.now()),
-              }))
+              normalizeEvents(
+                data.events.map((e: any) => ({
+                  ...e,
+                  timestamp: new Date(e.timestamp ?? Date.now()),
+                }))
+              )
             );
             const count = data.events.length;
             if (count !== prevEventCount.current) {
@@ -169,6 +233,9 @@ export default function Home() {
         initialThreadId={initialThreadId}
         onThreadChange={handleThreadChange}
         onResponseEnd={handleResponseEnd}
+        onRunnerUpdate={handleRunnerUpdate}
+        onRunnerEventDelta={handleRunnerEventDelta}
+        onRunnerBindThread={handleBindThread}
       />
     </main>
   );

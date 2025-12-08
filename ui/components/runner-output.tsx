@@ -49,6 +49,19 @@ function inlineValue(value: any) {
   }
 }
 
+function tryParseJson(value: any) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function groupRunnerEvents(events: AgentEvent[]) {
   const groups: AgentEvent[][] = [];
   for (let i = 0; i < events.length; i++) {
@@ -101,7 +114,26 @@ function buildEventText(event: AgentEvent) {
 
 function EventDetails({ event }: { event: AgentEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const text = buildEventText(event);
+  const toolArgs = event.metadata?.tool_args;
+  const toolResult = event.metadata?.tool_result;
+  const contextChanges = event.metadata?.changes;
+
+  const parsedArgs = tryParseJson(toolArgs);
+  const parsedResult = tryParseJson(toolResult);
+  const parsedContext = tryParseJson(contextChanges);
+  const isJsonResult = parsedResult !== null;
+
+  const collapsedArgsText =
+    toolArgs !== undefined ? (parsedArgs ? JSON.stringify(parsedArgs) : inlineValue(toolArgs)) : null;
+  const collapsedResultText =
+    toolResult !== undefined ? (isJsonResult ? JSON.stringify(parsedResult) : inlineValue(toolResult)) : null;
+
+  const text =
+    event.type === "tool_call"
+      ? null
+      : event.type === "tool_output" && collapsedResultText
+        ? collapsedResultText
+        : buildEventText(event);
   const clampStyle = !expanded
     ? { display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" as const }
     : undefined;
@@ -112,30 +144,78 @@ function EventDetails({ event }: { event: AgentEvent }) {
         <EventIcon type={event.type} icon={event.metadata?.icon} />
         <span className="whitespace-nowrap">{formatEventName(event.type)}</span>
       </div>
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => !prev)}
-        aria-expanded={expanded}
-        className="group flex-1 min-w-0 text-left flex items-start gap-2"
-      >
-        <div
-          className={`flex-1 overflow-hidden transition-[max-height] duration-200 ease-out ${
-            expanded ? "max-h-[420px]" : "max-h-6"
-          }`}
+      <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          aria-expanded={expanded}
+          className="group w-full text-left flex items-start gap-2"
         >
           <div
-            style={clampStyle}
-            className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap"
+            className={`flex-1 overflow-hidden transition-[max-height] duration-200 ease-out ${
+              expanded ? "max-h-[420px]" : "max-h-6"
+            }`}
           >
-            {text}
+            <div
+              style={clampStyle}
+              className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap flex flex-wrap items-start gap-1"
+            >
+              {event.type === "tool_call" ? (
+                <>
+                  <span className="font-mono text-[13px] text-gray-800">
+                    {event.content || "Tool call"}
+                  </span>
+                  {collapsedArgsText && !expanded && (
+                    <span className="font-mono text-[13px] text-gray-700">
+                      - {collapsedArgsText}
+                    </span>
+                  )}
+                </>
+              ) : event.type === "tool_output" && collapsedResultText ? (
+                isJsonResult ? (
+                  <span className="font-mono text-[13px] bg-gray-100 border border-gray-200 px-2 py-1 rounded">
+                    {collapsedResultText}
+                  </span>
+                ) : (
+                  <span className="text-sm text-gray-800">{collapsedResultText}</span>
+                )
+              ) : event.type === "context_update" && contextChanges ? (
+                Object.entries(contextChanges).map(([key, value]) => (
+                  <span key={key} className="font-mono text-[12px] text-gray-800">
+                    {key}: {inlineValue(value)}
+                  </span>
+                ))
+              ) : (
+                text
+              )}
+            </div>
           </div>
-        </div>
-        <ChevronDown
-          className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform duration-200 group-hover:text-gray-600 ${
-            expanded ? "rotate-180" : ""
-          }`}
-        />
-      </button>
+          <ChevronDown
+            className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform duration-200 group-hover:text-gray-600 ${
+              expanded ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+        {expanded && event.type === "tool_call" && toolArgs !== undefined && (
+          <pre className="mt-2 bg-gray-100 border border-gray-200 font-mono text-xs text-gray-800 p-2 rounded-md whitespace-pre-wrap break-words">
+            {JSON.stringify(parsedArgs ?? toolArgs, null, 2)}
+          </pre>
+        )}
+        {expanded && event.type === "tool_output" && toolResult !== undefined && (
+          isJsonResult ? (
+            <pre className="mt-2 bg-gray-100 border border-gray-200 font-mono text-xs text-gray-800 p-2 rounded-md whitespace-pre-wrap break-words">
+              {JSON.stringify(parsedResult, null, 2)}
+            </pre>
+          ) : (
+            <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap">{inlineValue(toolResult)}</div>
+          )
+        )}
+        {expanded && event.type === "context_update" && contextChanges && (
+          <pre className="mt-2 bg-gray-100 border border-gray-200 font-mono text-xs text-gray-800 p-2 rounded-md whitespace-pre-wrap break-words">
+            {JSON.stringify(parsedContext ?? contextChanges, null, 2)}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

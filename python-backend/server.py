@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import json
-import os
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-import sys
 
 from agents import (
     Handoff,
@@ -28,7 +22,7 @@ from agents import (
 )
 from agents.exceptions import MaxTurnsExceeded
 from chatkit.agents import stream_agent_response
-from chatkit.server import ChatKitServer, StreamingResult
+from chatkit.server import ChatKitServer
 from chatkit.types import (
     Action,
     AssistantMessageContent,
@@ -43,37 +37,16 @@ from chatkit.types import (
 )
 from chatkit.store import NotFoundError
 
-from main import (
-    AirlineAgentChatContext,
-    AirlineAgentContext,
+from airline.context import AirlineAgentChatContext, AirlineAgentContext, create_initial_context, public_context
+from airline.agents import (
     booking_cancellation_agent,
-    create_initial_context,
     faq_agent,
     flight_information_agent,
-    public_context,
     refunds_compensation_agent,
     seat_special_services_agent,
     triage_agent,
 )
 from memory_store import MemoryStore
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
-
-# Disable tracing for zero data retention orgs
-os.environ.setdefault("OPENAI_TRACING_DISABLED", "1")
-
-# CORS configuration (adjust as needed for deployment)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 class AgentEvent(BaseModel):
@@ -199,6 +172,10 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         self._state_for_thread(new_thread.id)
         return new_thread
 
+    async def ensure_thread(self, thread_id: Optional[str], context: dict[str, Any]) -> ThreadMetadata:
+        """Public wrapper to ensure a thread exists."""
+        return await self._ensure_thread(thread_id, context)
+
     def _record_guardrails(
         self,
         agent_name: str,
@@ -238,16 +215,8 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         """Send a delta-only payload (used for transient progress updates)."""
         listeners = self._listeners.get(thread.id, [])
         if not listeners:
-            logger.info("Broadcast progress skipped (no listeners) for thread %s", thread.id)
             return
         payload = json.dumps({"events_delta": [e.model_dump() for e in delta_events]}, default=str)
-        logger.info(
-            "Broadcasting progress delta to %s listeners for thread %s (delta=%s) at %s",
-            len(listeners),
-            thread.id,
-            len(delta_events),
-            time.time(),
-        )
         for q in list(listeners):
             try:
                 q.put_nowait(payload)
@@ -328,13 +297,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     metadata={"tool_args": self._truncate(_parse_tool_args(raw_args))},
                     timestamp=now_ms,
                 )
-                logger.info(
-                    "[emit] tool_call thread=%s agent=%s name=%s t=%s",
-                    thread_id,
-                    ev.agent,
-                    tool_name,
-                    now_ms,
-                )
                 events.append(ev)
             elif isinstance(item, ToolCallOutputItem):
                 ev = AgentEvent(
@@ -344,12 +306,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     content=self._truncate(str(item.output)),
                     metadata={"tool_result": self._truncate(item.output)},
                     timestamp=now_ms,
-                )
-                logger.info(
-                    "[emit] tool_output thread=%s agent=%s t=%s",
-                    thread_id,
-                    ev.agent,
-                    now_ms,
                 )
                 events.append(ev)
 
@@ -388,13 +344,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             async for event in stream_agent_response(chat_context, result):
                 if isinstance(event, ProgressUpdateEvent) or getattr(event, "type", "") == "progress_update_event":
                     # Ignore progress updates for the Runner panel; ChatKit will handle them separately.
-                    logger.info(
-                        "[stream] Progress update skipped for runner thread %s agent=%s text=%s emitted_at=%s",
-                        thread.id,
-                        state.current_agent_name,
-                        self._truncate(getattr(event, "text", "") or ""),
-                        time.time(),
-                    )
                     continue
                 # If this is a run-item event, convert and broadcast immediately.
                 if hasattr(event, "item"):
@@ -420,7 +369,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                                 },
                             )
                     except Exception as err:
-                        logger.exception("Failed to convert run item event: %s", err)
+                        pass
                 yield event
                 new_items = result.new_items[streamed_items_seen:]
                 if new_items:
@@ -430,11 +379,6 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     state.events.extend(new_events)
                     state.current_agent_name = active_agent
                     streamed_items_seen += len(new_items)
-                    logger.info(
-                        "Streaming state update: %s new_items, active_agent=%s",
-                        len(new_items),
-                        active_agent,
-                    )
                     await self._broadcast_state(thread, context)
                     yield ClientEffectEvent(
                         name="runner_state_update",
@@ -448,8 +392,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                             "events": [e.model_dump() for e in new_events],
                         },
                     )
-        except MaxTurnsExceeded as exc:
-            logger.warning("Max turns exceeded: %s", exc)
+        except MaxTurnsExceeded:
             await self._broadcast_state(thread, context)
         except InputGuardrailTripwireTriggered as exc:
             failed_guardrail = exc.guardrail_result.guardrail
@@ -560,6 +503,10 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 pass
         return q
 
+    def register_listener(self, thread_id: str) -> asyncio.Queue:
+        """Public wrapper for listener registration."""
+        return self._register_listener(thread_id)
+
     def _unregister_listener(self, thread_id: str, queue: asyncio.Queue) -> None:
         listeners = self._listeners.get(thread_id, [])
         if queue in listeners:
@@ -567,14 +514,13 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         if not listeners and thread_id in self._listeners:
             self._listeners.pop(thread_id, None)
 
+    def unregister_listener(self, thread_id: str, queue: asyncio.Queue) -> None:
+        """Public wrapper for listener cleanup."""
+        self._unregister_listener(thread_id, queue)
+
     async def _broadcast_state(self, thread: ThreadMetadata, context: dict[str, Any]) -> None:
         listeners = self._listeners.get(thread.id, [])
         if not listeners:
-            logger.info(
-                "Broadcast skipped (no listeners) for thread %s (events=%s)",
-                thread.id,
-                len(self._state_for_thread(thread.id).events),
-            )
             return
         snap = await self.snapshot(thread.id, context)
         # Compute delta of new events since last broadcast to reduce payloads
@@ -588,90 +534,8 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         }
         payload = json.dumps(payload_obj, default=str)
         self._last_snapshot[thread.id] = payload
-        logger.info(
-            "Broadcasting state to %s listeners for thread %s (events=%s guardrails=%s delta=%s) at %s",
-            len(listeners),
-            thread.id,
-            len(snap.get("events", [])),
-            len(snap.get("guardrails", [])),
-            len(delta),
-            time.time(),
-        )
         for q in list(listeners):
             try:
                 q.put_nowait(payload)
             except asyncio.QueueFull:
                 pass
-
-
-server = AirlineServer()
-
-
-def get_server() -> AirlineServer:
-    return server
-
-
-@app.post("/chatkit")
-async def chatkit_endpoint(
-    request: Request, server: AirlineServer = Depends(get_server)
-) -> Response:
-    payload = await request.body()
-    result = await server.process(payload, {"request": request})
-    if isinstance(result, StreamingResult):
-        return StreamingResponse(result, media_type="text/event-stream")
-    if hasattr(result, "json"):
-        return Response(content=result.json, media_type="application/json")
-    return Response(content=result)
-
-
-@app.get("/chatkit/state")
-async def chatkit_state(
-    thread_id: str = Query(..., description="ChatKit thread identifier"),
-    server: AirlineServer = Depends(get_server),
-) -> Dict[str, Any]:
-    return await server.snapshot(thread_id, {"request": None})
-
-
-@app.get("/chatkit/bootstrap")
-async def chatkit_bootstrap(
-    server: AirlineServer = Depends(get_server),
-) -> Dict[str, Any]:
-    return await server.snapshot(None, {"request": None})
-
-
-@app.get("/chatkit/state/stream")
-async def chatkit_state_stream(
-    thread_id: str = Query(..., description="ChatKit thread identifier"),
-    server: AirlineServer = Depends(get_server),
-):
-    """
-    Server-Sent Events endpoint to push state updates (agents/events/guardrails/context) to the UI.
-    """
-    thread = await server._ensure_thread(thread_id, {"request": None})
-    logger.info("SSE client connected for thread %s", thread.id)
-    queue = server._register_listener(thread.id)
-
-    async def event_generator():
-        try:
-            # send initial snapshot
-            initial = await server.snapshot(thread.id, {"request": None})
-            logger.info(
-                "SSE initial snapshot for thread %s (events=%s guardrails=%s)",
-                thread.id,
-                len(initial.get("events", [])),
-                len(initial.get("guardrails", [])),
-            )
-            yield f"data: {json.dumps(initial, default=str)}\n\n"
-            while True:
-                data = await queue.get()
-                yield f"data: {data}\n\n"
-        finally:
-            server._unregister_listener(thread.id, queue)
-            logger.info("SSE client disconnected for thread %s", thread.id)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
-@app.get("/health")
-async def health_check() -> Dict[str, str]:
-    return {"status": "healthy"}

@@ -60,7 +60,7 @@ You can either run the backend independently if you want to use a separate UI, o
 From the `python-backend` folder, run:
 
 ```bash
-python -m uvicorn api:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 ```
 
 The backend will be available at: [http://localhost:8000](http://localhost:8000)

@@ -15,34 +15,48 @@ export default function Home() {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
 
-  const hydrateState = useCallback(
-    async (id: string | null) => {
-      if (!id) return;
-      const data = await fetchThreadState(id);
-      if (!data) return;
+  const normalizeEvents = useCallback((items: AgentEvent[]) => {
+    if (!items.length) return items;
+    const now = Date.now();
+    const latestNonProgress = items
+      .filter((e) => e.type !== "progress_update")
+      .reduce((max, e) => Math.max(max, e.timestamp.getTime()), 0);
+    const pruned = items.filter((e) => {
+      if (e.type !== "progress_update") return true;
+      const ts = e.timestamp.getTime();
+      // Drop old progress once a newer non-progress exists, or after 15s
+      if (latestNonProgress && ts < latestNonProgress) return false;
+      if (now - ts > 15000) return false;
+      return true;
+    });
+    return pruned;
+  }, []);
 
-      setCurrentAgent(data.current_agent || "");
-      setContext(data.context || {});
-      if (Array.isArray(data.agents)) setAgents(data.agents);
-      if (Array.isArray(data.events)) {
-        setEvents(
-          data.events.map((e: any) => ({
-            ...e,
-            timestamp: new Date(e.timestamp ?? Date.now()),
-          }))
-        );
-      }
-      if (Array.isArray(data.guardrails)) {
-        setGuardrails(
-          data.guardrails.map((g: any) => ({
-            ...g,
-            timestamp: new Date(g.timestamp ?? Date.now()),
-          }))
-        );
-      }
-    },
-    []
-  );
+  const hydrateState = useCallback(async (id: string | null) => {
+    if (!id) return;
+    const data = await fetchThreadState(id);
+    if (!data) return;
+
+    setCurrentAgent(data.current_agent || "");
+    setContext(data.context || {});
+    if (Array.isArray(data.agents)) setAgents(data.agents);
+    if (Array.isArray(data.events)) {
+      setEvents(
+        data.events.map((e: any) => ({
+          ...e,
+          timestamp: new Date(e.timestamp ?? Date.now()),
+        }))
+      );
+    }
+    if (Array.isArray(data.guardrails)) {
+      setGuardrails(
+        data.guardrails.map((g: any) => ({
+          ...g,
+          timestamp: new Date(g.timestamp ?? Date.now()),
+        }))
+      );
+    }
+  }, []);
 
   useEffect(() => {
     if (threadId) {
@@ -61,10 +75,12 @@ export default function Home() {
       if (bootstrap.context) setContext(bootstrap.context);
       if (Array.isArray(bootstrap.events)) {
         setEvents(
-          bootstrap.events.map((e: any) => ({
-            ...e,
-            timestamp: new Date(e.timestamp ?? Date.now()),
-          }))
+          normalizeEvents(
+            bootstrap.events.map((e: any) => ({
+              ...e,
+              timestamp: new Date(e.timestamp ?? Date.now()),
+            }))
+          )
         );
       }
       if (Array.isArray(bootstrap.guardrails)) {
@@ -79,6 +95,10 @@ export default function Home() {
   }, []);
 
   const handleThreadChange = useCallback((id: string | null) => {
+    setThreadId(id);
+  }, []);
+
+  const handleBindThread = useCallback((id: string) => {
     setThreadId(id);
   }, []);
 
@@ -99,6 +119,7 @@ export default function Home() {
         initialThreadId={initialThreadId}
         onThreadChange={handleThreadChange}
         onResponseEnd={handleResponseEnd}
+        onRunnerBindThread={handleBindThread}
       />
     </main>
   );

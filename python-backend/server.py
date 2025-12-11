@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+import asyncio
+import json
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from agents import (
@@ -22,46 +20,33 @@ from agents import (
     ToolCallItem,
     ToolCallOutputItem,
 )
+from agents.exceptions import MaxTurnsExceeded
 from chatkit.agents import stream_agent_response
-from chatkit.server import ChatKitServer, StreamingResult
+from chatkit.server import ChatKitServer
 from chatkit.types import (
     Action,
     AssistantMessageContent,
     AssistantMessageItem,
+    ClientEffectEvent,
     ThreadItemDoneEvent,
     ThreadMetadata,
     ThreadStreamEvent,
     UserMessageItem,
     WidgetItem,
+    ProgressUpdateEvent,
 )
 from chatkit.store import NotFoundError
 
-from main import (
-    AirlineAgentChatContext,
-    AirlineAgentContext,
-    cancellation_agent,
-    create_initial_context,
+from airline.context import AirlineAgentChatContext, AirlineAgentContext, create_initial_context, public_context
+from airline.agents import (
+    booking_cancellation_agent,
     faq_agent,
-    flight_status_agent,
-    seat_booking_agent,
+    flight_information_agent,
+    refunds_compensation_agent,
+    seat_special_services_agent,
     triage_agent,
 )
 from memory_store import MemoryStore
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
-
-# CORS configuration (adjust as needed for deployment)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 class AgentEvent(BaseModel):
@@ -87,9 +72,10 @@ def _get_agent_by_name(name: str):
     agents = {
         triage_agent.name: triage_agent,
         faq_agent.name: faq_agent,
-        seat_booking_agent.name: seat_booking_agent,
-        flight_status_agent.name: flight_status_agent,
-        cancellation_agent.name: cancellation_agent,
+        seat_special_services_agent.name: seat_special_services_agent,
+        flight_information_agent.name: flight_information_agent,
+        booking_cancellation_agent.name: booking_cancellation_agent,
+        refunds_compensation_agent.name: refunds_compensation_agent,
     }
     return agents.get(name, triage_agent)
 
@@ -123,9 +109,10 @@ def _build_agents_list() -> List[Dict[str, Any]]:
     return [
         make_agent_dict(triage_agent),
         make_agent_dict(faq_agent),
-        make_agent_dict(seat_booking_agent),
-        make_agent_dict(flight_status_agent),
-        make_agent_dict(cancellation_agent),
+        make_agent_dict(seat_special_services_agent),
+        make_agent_dict(flight_information_agent),
+        make_agent_dict(booking_cancellation_agent),
+        make_agent_dict(refunds_compensation_agent),
     ]
 
 
@@ -163,6 +150,9 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         self.store = MemoryStore()
         super().__init__(self.store)
         self._state: Dict[str, ConversationState] = {}
+        self._listeners: Dict[str, list[asyncio.Queue]] = {}
+        self._last_event_index: Dict[str, int] = {}
+        self._last_snapshot: Dict[str, str] = {}
 
     def _state_for_thread(self, thread_id: str) -> ConversationState:
         if thread_id not in self._state:
@@ -181,6 +171,10 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         await self.store.save_thread(new_thread, context)
         self._state_for_thread(new_thread.id)
         return new_thread
+
+    async def ensure_thread(self, thread_id: Optional[str], context: dict[str, Any]) -> ThreadMetadata:
+        """Public wrapper to ensure a thread exists."""
+        return await self._ensure_thread(thread_id, context)
 
     def _record_guardrails(
         self,
@@ -211,18 +205,36 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             )
         return checks
 
+    @staticmethod
+    def _truncate(val: Any, limit: int = 200) -> Any:
+        if isinstance(val, str) and len(val) > limit:
+            return val[:limit] + "…"
+        return val
+
+    async def _broadcast_delta(self, thread: ThreadMetadata, delta_events: list[AgentEvent]) -> None:
+        """Send a delta-only payload (used for transient progress updates)."""
+        listeners = self._listeners.get(thread.id, [])
+        if not listeners:
+            return
+        payload = json.dumps({"events_delta": [e.model_dump() for e in delta_events]}, default=str)
+        for q in list(listeners):
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
+
     def _record_events(
         self,
         run_items: List[Any],
         current_agent_name: str,
+        thread_id: str,
     ) -> (List[AgentEvent], str):
         events: List[AgentEvent] = []
         active_agent = current_agent_name
-        now_ms = time.time() * 1000
-
         for item in run_items:
+            now_ms = time.time() * 1000
             if isinstance(item, MessageOutputItem):
-                text = ItemHelpers.text_message_output(item)
+                text = self._truncate(ItemHelpers.text_message_output(item))
                 events.append(
                     AgentEvent(
                         id=uuid4().hex,
@@ -277,27 +289,25 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             elif isinstance(item, ToolCallItem):
                 tool_name = getattr(item.raw_item, "name", None)
                 raw_args = getattr(item.raw_item, "arguments", None)
-                events.append(
-                    AgentEvent(
-                        id=uuid4().hex,
-                        type="tool_call",
-                        agent=item.agent.name,
-                        content=tool_name or "",
-                        metadata={"tool_args": _parse_tool_args(raw_args)},
-                        timestamp=now_ms,
-                    )
+                ev = AgentEvent(
+                    id=uuid4().hex,
+                    type="tool_call",
+                    agent=item.agent.name,
+                    content=self._truncate(tool_name or ""),
+                    metadata={"tool_args": self._truncate(_parse_tool_args(raw_args))},
+                    timestamp=now_ms,
                 )
+                events.append(ev)
             elif isinstance(item, ToolCallOutputItem):
-                events.append(
-                    AgentEvent(
-                        id=uuid4().hex,
-                        type="tool_output",
-                        agent=item.agent.name,
-                        content=str(item.output),
-                        metadata={"tool_result": item.output},
-                        timestamp=now_ms,
-                    )
+                ev = AgentEvent(
+                    id=uuid4().hex,
+                    type="tool_output",
+                    agent=item.agent.name,
+                    content=self._truncate(str(item.output)),
+                    metadata={"tool_result": self._truncate(item.output)},
+                    timestamp=now_ms,
                 )
+                events.append(ev)
 
         return events, active_agent
 
@@ -313,13 +323,17 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             user_text = _user_message_to_text(input_user_message)
             state.input_items.append({"content": user_text, "role": "user"})
 
-        previous_context = state.context.model_dump()
+        previous_context = public_context(state.context)
         chat_context = AirlineAgentChatContext(
             thread=thread,
             store=self.store,
             request_context=context,
             state=state.context,
         )
+        streamed_items_seen = 0
+
+        # Tell the client which thread to bind runner updates to before streaming starts.
+        yield ClientEffectEvent(name="runner_bind_thread", data={"thread_id": thread.id, "ts": time.time()})
 
         try:
             result = Runner.run_streamed(
@@ -328,7 +342,58 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 context=chat_context,
             )
             async for event in stream_agent_response(chat_context, result):
+                if isinstance(event, ProgressUpdateEvent) or getattr(event, "type", "") == "progress_update_event":
+                    # Ignore progress updates for the Runner panel; ChatKit will handle them separately.
+                    continue
+                # If this is a run-item event, convert and broadcast immediately.
+                if hasattr(event, "item"):
+                    try:
+                        run_item = getattr(event, "item")
+                        new_events, active_agent = self._record_events(
+                            [run_item], state.current_agent_name, thread.id
+                        )
+                        if new_events:
+                            state.events.extend(new_events)
+                            state.current_agent_name = active_agent
+                            await self._broadcast_state(thread, context)
+                            yield ClientEffectEvent(
+                                name="runner_state_update",
+                                data={"thread_id": thread.id, "ts": time.time()},
+                            )
+                            yield ClientEffectEvent(
+                                name="runner_event_delta",
+                                data={
+                                    "thread_id": thread.id,
+                                    "ts": time.time(),
+                                    "events": [e.model_dump() for e in new_events],
+                                },
+                            )
+                    except Exception as err:
+                        pass
                 yield event
+                new_items = result.new_items[streamed_items_seen:]
+                if new_items:
+                    new_events, active_agent = self._record_events(
+                        new_items, state.current_agent_name, thread.id
+                    )
+                    state.events.extend(new_events)
+                    state.current_agent_name = active_agent
+                    streamed_items_seen += len(new_items)
+                    await self._broadcast_state(thread, context)
+                    yield ClientEffectEvent(
+                        name="runner_state_update",
+                        data={"thread_id": thread.id, "ts": time.time()},
+                    )
+                    yield ClientEffectEvent(
+                        name="runner_event_delta",
+                        data={
+                            "thread_id": thread.id,
+                            "ts": time.time(),
+                            "events": [e.model_dump() for e in new_events],
+                        },
+                    )
+        except MaxTurnsExceeded:
+            await self._broadcast_state(thread, context)
         except InputGuardrailTripwireTriggered as exc:
             failed_guardrail = exc.guardrail_result.guardrail
             gr_output = exc.guardrail_result.output.output_info
@@ -358,9 +423,9 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 )
             )
             return
-
         state.input_items = result.to_input_list()
-        new_events, active_agent = self._record_events(result.new_items, state.current_agent_name)
+        remaining_items = result.new_items[streamed_items_seen:]
+        new_events, active_agent = self._record_events(remaining_items, state.current_agent_name, thread.id)
         state.events.extend(new_events)
         final_agent_name = active_agent
         try:
@@ -374,7 +439,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             guardrail_results=result.input_guardrail_results,
         )
 
-        new_context = state.context.model_dump()
+        new_context = public_context(state.context)
         changes = {k: new_context[k] for k in new_context if previous_context.get(k) != new_context[k]}
         if changes:
             state.events.append(
@@ -386,6 +451,20 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     metadata={"changes": changes},
                     timestamp=time.time() * 1000,
                 )
+            )
+        await self._broadcast_state(thread, context)
+        yield ClientEffectEvent(
+            name="runner_state_update",
+            data={"thread_id": thread.id, "ts": time.time()},
+        )
+        if new_events:
+            yield ClientEffectEvent(
+                name="runner_event_delta",
+                data={
+                    "thread_id": thread.id,
+                    "ts": time.time(),
+                    "events": [e.model_dump() for e in new_events],
+                },
             )
 
     async def action(
@@ -405,48 +484,58 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         return {
             "thread_id": thread.id,
             "current_agent": state.current_agent_name,
-            "context": state.context.model_dump(),
+            "context": public_context(state.context),
             "agents": _build_agents_list(),
             "events": [e.model_dump() for e in state.events],
             "guardrails": [g.model_dump() for g in state.guardrails],
         }
 
+    # -- Streaming state updates to UI listeners ---------------------------------
+    def _register_listener(self, thread_id: str) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue()
+        self._listeners.setdefault(thread_id, []).append(q)
+        # Push last snapshot if available so late listeners get current state immediately.
+        last = self._last_snapshot.get(thread_id)
+        if last:
+            try:
+                q.put_nowait(last)
+            except asyncio.QueueFull:
+                pass
+        return q
 
-server = AirlineServer()
+    def register_listener(self, thread_id: str) -> asyncio.Queue:
+        """Public wrapper for listener registration."""
+        return self._register_listener(thread_id)
 
+    def _unregister_listener(self, thread_id: str, queue: asyncio.Queue) -> None:
+        listeners = self._listeners.get(thread_id, [])
+        if queue in listeners:
+            listeners.remove(queue)
+        if not listeners and thread_id in self._listeners:
+            self._listeners.pop(thread_id, None)
 
-def get_server() -> AirlineServer:
-    return server
+    def unregister_listener(self, thread_id: str, queue: asyncio.Queue) -> None:
+        """Public wrapper for listener cleanup."""
+        self._unregister_listener(thread_id, queue)
 
-
-@app.post("/chatkit")
-async def chatkit_endpoint(
-    request: Request, server: AirlineServer = Depends(get_server)
-) -> Response:
-    payload = await request.body()
-    result = await server.process(payload, {"request": request})
-    if isinstance(result, StreamingResult):
-        return StreamingResponse(result, media_type="text/event-stream")
-    if hasattr(result, "json"):
-        return Response(content=result.json, media_type="application/json")
-    return Response(content=result)
-
-
-@app.get("/chatkit/state")
-async def chatkit_state(
-    thread_id: str = Query(..., description="ChatKit thread identifier"),
-    server: AirlineServer = Depends(get_server),
-) -> Dict[str, Any]:
-    return await server.snapshot(thread_id, {"request": None})
-
-
-@app.get("/chatkit/bootstrap")
-async def chatkit_bootstrap(
-    server: AirlineServer = Depends(get_server),
-) -> Dict[str, Any]:
-    return await server.snapshot(None, {"request": None})
-
-
-@app.get("/health")
-async def health_check() -> Dict[str, str]:
-    return {"status": "healthy"}
+    async def _broadcast_state(self, thread: ThreadMetadata, context: dict[str, Any]) -> None:
+        listeners = self._listeners.get(thread.id, [])
+        if not listeners:
+            return
+        snap = await self.snapshot(thread.id, context)
+        # Compute delta of new events since last broadcast to reduce payloads
+        last_idx = self._last_event_index.get(thread.id, 0)
+        total_events = len(snap.get("events", []))
+        delta = snap.get("events", [])[last_idx:] if total_events >= last_idx else snap.get("events", [])
+        self._last_event_index[thread.id] = total_events
+        payload_obj = {
+            **snap,
+            "events_delta": delta,
+        }
+        payload = json.dumps(payload_obj, default=str)
+        self._last_snapshot[thread.id] = payload
+        for q in list(listeners):
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass

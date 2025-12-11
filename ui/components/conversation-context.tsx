@@ -5,16 +5,33 @@ import { Card, CardContent } from "@/components/ui/card";
 import { BookText } from "lucide-react";
 
 interface ConversationContextProps {
-  context: {
-    passenger_name?: string;
-    confirmation_number?: string;
-    seat_number?: string;
-    flight_number?: string;
-    account_number?: string;
-  };
+  context: Record<string, any>;
 }
 
 export function ConversationContext({ context }: ConversationContextProps) {
+  const formatValue = (value: any) => {
+    if (value === null || value === undefined || value === "") return "null";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "[]";
+      const primitives = value.every(
+        (item) => ["string", "number", "boolean"].includes(typeof item)
+      );
+      if (primitives && value.length <= 3) {
+        return value.join(", ");
+      }
+      return `${value.length} item${value.length === 1 ? "" : "s"}`;
+    }
+    if (typeof value === "object") {
+      const keys = Object.keys(value);
+      if (keys.length === 0) return "object";
+      return `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", ..." : ""}}`;
+    }
+    return String(value);
+  };
+
   return (
     <PanelSection
       title="Conversation Context"
@@ -28,19 +45,24 @@ export function ConversationContext({ context }: ConversationContextProps) {
                 key={key}
                 className="flex items-center gap-2 bg-white p-2 rounded-md border border-gray-200 shadow-sm transition-all"
               >
-                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                <div className="text-xs">
-                  <span className="text-zinc-500 font-light">{key}:</span>{" "}
-                  <span
-                    className={
-                      value
-                        ? "text-zinc-900 font-light"
-                        : "text-gray-400 italic"
-                    }
-                  >
-                    {value || "null"}
-                  </span>
-                </div>
+                {(() => {
+                  const rendered = formatValue(value);
+                  return (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <div className="text-xs space-y-1">
+                        <div className="text-zinc-500 font-light">{key}:</div>
+                        <span
+                          className={
+                            value ? "text-zinc-900 font-light break-words" : "text-gray-400 italic"
+                          }
+                        >
+                          {rendered}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>

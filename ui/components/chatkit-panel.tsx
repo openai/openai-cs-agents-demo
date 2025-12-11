@@ -1,11 +1,15 @@
 "use client";
 
 import { ChatKit, useChatKit } from "@openai/chatkit-react";
+import React from "react";
 
 type ChatKitPanelProps = {
   initialThreadId?: string | null;
   onThreadChange?: (threadId: string | null) => void;
   onResponseEnd?: () => void;
+  onRunnerUpdate?: () => void;
+  onRunnerEventDelta?: (events: any[]) => void;
+  onRunnerBindThread?: (threadId: string) => void;
 };
 
 const CHATKIT_DOMAIN_KEY =
@@ -15,6 +19,9 @@ export function ChatKitPanel({
   initialThreadId,
   onThreadChange,
   onResponseEnd,
+  onRunnerUpdate,
+  onRunnerEventDelta,
+  onRunnerBindThread,
 }: ChatKitPanelProps) {
   const chatkit = useChatKit({
     api: {
@@ -47,7 +54,11 @@ export function ChatKitPanel({
           label: "Flight status",
           prompt: "What's the status of flight FLT-123?",
         },
-        { label: "Cancellation", prompt: "I need to cancel my trip." },
+        {
+          label: "Missed connection",
+          prompt:
+            "My flight from Paris to New York was delayed and I missed my connection to Austin. Also, my checked bag is missing and I need to spend the night in New York. Can you help me?",
+        },
       ],
     },
     threadItemActions: {
@@ -57,6 +68,20 @@ export function ChatKitPanel({
     onResponseEnd: () => onResponseEnd?.(),
     onError: ({ error }) => {
       console.error("ChatKit error", error);
+    },
+    onEffect: async ({ name }) => {
+      if (name === "runner_state_update") {
+        onRunnerUpdate?.();
+      }
+      if (name === "runner_event_delta") {
+        onRunnerEventDelta?.((arguments as any)?.[0]?.data?.events ?? []);
+      }
+      if (name === "runner_bind_thread") {
+        const tid = (arguments as any)?.[0]?.data?.thread_id;
+        if (tid) {
+          onRunnerBindThread?.(tid);
+        }
+      }
     },
   });
 

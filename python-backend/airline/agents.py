@@ -22,7 +22,7 @@ from .tools import (
     update_seat,
 )
 
-MODEL = "gpt-5.1"
+MODEL = "gpt-5.2"
 
 
 def seat_services_instructions(

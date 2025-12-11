@@ -74,10 +74,9 @@ export function ChatKitPanel({
         onRunnerUpdate?.();
       }
       if (name === "runner_event_delta") {
-        // runner_event_delta includes events payload in the effect data
         onRunnerEventDelta?.((arguments as any)?.[0]?.data?.events ?? []);
       }
-       if (name === "runner_bind_thread") {
+      if (name === "runner_bind_thread") {
         const tid = (arguments as any)?.[0]?.data?.thread_id;
         if (tid) {
           onRunnerBindThread?.(tid);
@@ -98,11 +97,6 @@ export function ChatKitPanel({
           control={chatkit.control}
           className="block h-full w-full"
           style={{ height: "100%", width: "100%" }}
-          onThreadChange={(e: any) =>
-            console.info("[ChatKit component thread change]", e?.detail ?? e)
-          }
-          onResponseStart={() => console.info("[ChatKit component response start]", Date.now())}
-          onResponseEnd={() => console.info("[ChatKit component response end]", Date.now())}
         />
       </div>
     </div>

@@ -41,9 +41,8 @@ export function AgentPanel({
 
       <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
         <AgentsList agents={agents} currentAgent={currentAgent} />
-        <RunnerOutput runnerEvents={runnerEvents} />
         <ConversationContext context={context} />
-
+        <RunnerOutput runnerEvents={runnerEvents} />
         <Guardrails
           guardrails={guardrails}
           inputGuardrails={activeAgent?.input_guardrails ?? []}

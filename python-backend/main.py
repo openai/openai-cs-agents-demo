@@ -20,8 +20,7 @@ from chatkit.agents import AgentContext
 from chatkit.types import ProgressUpdateEvent
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
-MODEL = "robin-alpha-next-2025-11-24"
-#MODEL = "gpt-4.1"
+MODEL = "gpt-5.1"
 GUARDRAIL_MODEL = "gpt-4.1-mini"
 
 # =========================

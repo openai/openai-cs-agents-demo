@@ -204,6 +204,7 @@ def seat_booking_instructions(
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are a seat booking agent. If you are speaking to a customer, you probably were transferred to from the triage agent.\n"
         "Use the following routine to support the customer.\n"
+        "If anything is ambiguous or missing, ask one concise clarifying question before proceeding.\n"
         f"1. The customer's confirmation number is {confirmation}."+
         "If this is not available, ask the customer for their confirmation number. If you have it, confirm that is the confirmation number they are referencing.\n"
         "2. Ask the customer what their desired seat number is. You can also use the display_seat_map tool to show them an interactive seat map where they can click to select their preferred seat.\n"
@@ -213,7 +214,7 @@ def seat_booking_instructions(
 
 seat_booking_agent = Agent[AirlineAgentChatContext](
     name="Seat Booking Agent",
-    model="gpt-4.1",
+    model="gpt-5.2",
     handoff_description="A helpful agent that can update a seat on a flight.",
     instructions=seat_booking_instructions,
     tools=[update_seat, display_seat_map],
@@ -229,6 +230,7 @@ def flight_status_instructions(
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are a Flight Status Agent. Use the following routine to support the customer:\n"
+        "If anything is ambiguous or missing, ask one concise clarifying question before proceeding.\n"
         f"1. The customer's confirmation number is {confirmation} and flight number is {flight}.\n"
         "   If either is not available, ask the customer for the missing information. If you have both, confirm with the customer that these are correct.\n"
         "2. Use the flight_status_tool to report the status of the flight.\n"
@@ -237,7 +239,7 @@ def flight_status_instructions(
 
 flight_status_agent = Agent[AirlineAgentChatContext](
     name="Flight Status Agent",
-    model="gpt-4.1",
+    model="gpt-5.2",
     handoff_description="An agent to provide flight status information.",
     instructions=flight_status_instructions,
     tools=[flight_status_tool],
@@ -277,6 +279,7 @@ def cancellation_instructions(
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
         "You are a Cancellation Agent. Use the following routine to support the customer:\n"
+        "If anything is ambiguous or missing, ask one concise clarifying question before proceeding.\n"
         f"1. The customer's confirmation number is {confirmation} and flight number is {flight}.\n"
         "   If either is not available, ask the customer for the missing information. If you have both, confirm with the customer that these are correct.\n"
         "2. If the customer confirms, use the cancel_flight tool to cancel their flight.\n"
@@ -285,7 +288,7 @@ def cancellation_instructions(
 
 cancellation_agent = Agent[AirlineAgentChatContext](
     name="Cancellation Agent",
-    model="gpt-4.1",
+    model="gpt-5.2",
     handoff_description="An agent to cancel flights.",
     instructions=cancellation_instructions,
     tools=[cancel_flight],
@@ -294,11 +297,12 @@ cancellation_agent = Agent[AirlineAgentChatContext](
 
 faq_agent = Agent[AirlineAgentChatContext](
     name="FAQ Agent",
-    model="gpt-4.1",
+    model="gpt-5.2",
     handoff_description="A helpful agent that can answer questions about the airline.",
     instructions=f"""{RECOMMENDED_PROMPT_PREFIX}
     You are an FAQ agent. If you are speaking to a customer, you probably were transferred to from the triage agent.
     Use the following routine to support the customer.
+    If anything is ambiguous or missing, ask one concise clarifying question before proceeding.
     1. Identify the last question asked by the customer.
     2. Use the faq lookup tool to get the answer. Do not rely on your own knowledge.
     3. Respond to the customer with the answer""",
@@ -308,7 +312,7 @@ faq_agent = Agent[AirlineAgentChatContext](
 
 triage_agent = Agent[AirlineAgentChatContext](
     name="Triage Agent",
-    model="gpt-4.1",
+    model="gpt-5.2",
     handoff_description="A triage agent that can delegate a customer's request to the appropriate agent.",
     instructions=(
         f"{RECOMMENDED_PROMPT_PREFIX} "

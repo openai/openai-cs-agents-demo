@@ -69,15 +69,15 @@ export function ChatKitPanel({
     onError: ({ error }) => {
       console.error("ChatKit error", error);
     },
-    onEffect: async ({ name }) => {
+    onEffect: async ({ name, data }: { name: string; data?: any }) => {
       if (name === "runner_state_update") {
         onRunnerUpdate?.();
       }
       if (name === "runner_event_delta") {
-        onRunnerEventDelta?.((arguments as any)?.[0]?.data?.events ?? []);
+        onRunnerEventDelta?.(data?.events ?? []);
       }
       if (name === "runner_bind_thread") {
-        const tid = (arguments as any)?.[0]?.data?.thread_id;
+        const tid = data?.thread_id;
         if (tid) {
           onRunnerBindThread?.(tid);
         }

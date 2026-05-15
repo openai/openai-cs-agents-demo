@@ -30,6 +30,38 @@ app = FastAPI()
 # Disable tracing for zero data retention orgs
 os.environ.setdefault("OPENAI_TRACING_DISABLED", "1")
 
+# ---------------------------------------------------------------------------
+# Astraflow provider support (OpenAI-compatible, by UCloud / 优刻得)
+# Supports 200+ models via a drop-in OpenAI-compatible endpoint.
+#
+# Global endpoint: set ASTRAFLOW_API_KEY
+#   https://astraflow.ucloud-global.com
+# China  endpoint: set ASTRAFLOW_CN_API_KEY
+#   https://astraflow.ucloud.cn
+#
+# If neither key is set the app falls back to the standard OpenAI client.
+# ---------------------------------------------------------------------------
+_astraflow_api_key = os.environ.get("ASTRAFLOW_API_KEY")
+_astraflow_cn_api_key = os.environ.get("ASTRAFLOW_CN_API_KEY")
+
+if _astraflow_api_key or _astraflow_cn_api_key:
+    import openai
+    from agents import set_default_openai_client
+
+    if _astraflow_api_key:
+        _astraflow_base_url = "https://api-us-ca.umodelverse.ai/v1"
+        _astraflow_key = _astraflow_api_key
+    else:
+        _astraflow_base_url = "https://api.modelverse.cn/v1"
+        _astraflow_key = _astraflow_cn_api_key
+
+    _astraflow_client = openai.AsyncOpenAI(
+        api_key=_astraflow_key,
+        base_url=_astraflow_base_url,
+    )
+    set_default_openai_client(_astraflow_client)
+
+
 # CORS configuration (adjust as needed for deployment)
 app.add_middleware(
     CORSMiddleware,

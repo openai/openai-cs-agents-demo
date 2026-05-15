@@ -1,5 +1,6 @@
 from __future__ import annotations as _annotations
 
+import os
 import random
 import string
 
@@ -22,7 +23,9 @@ from .tools import (
     update_seat,
 )
 
-MODEL = "gpt-5.2"
+# Allow overriding the model via ASTRAFLOW_MODEL (useful when routing through
+# the Astraflow platform which exposes 200+ OpenAI-compatible models).
+MODEL = os.environ.get("ASTRAFLOW_MODEL", "gpt-5.2")
 
 
 def seat_services_instructions(

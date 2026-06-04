@@ -341,7 +341,20 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 state.input_items,
                 context=chat_context,
             )
+            # chatkit-agents stamps every AssistantMessageItem with placeholder id '__fake_id__';
+            # ChatKit client keys messages by id, so duplicates collapse into the same DOM node
+            # (visible as the latest assistant reply overwriting the previous one). Replace it with
+            # a unique store-generated id, kept consistent across Added -> Updated* -> Done for one message.
+            _fake_id_replacement: Optional[str] = None
             async for event in stream_agent_response(chat_context, result):
+                _it = getattr(event, "item", None)
+                if _it is not None and getattr(_it, "id", None) == "__fake_id__":
+                    if type(event).__name__ == "ThreadItemAddedEvent" or _fake_id_replacement is None:
+                        _fake_id_replacement = self.store.generate_item_id("message", thread, context)
+                    try:
+                        _it.id = _fake_id_replacement
+                    except Exception:
+                        pass
                 if isinstance(event, ProgressUpdateEvent) or getattr(event, "type", "") == "progress_update_event":
                     # Ignore progress updates for the Runner panel; ChatKit will handle them separately.
                     continue

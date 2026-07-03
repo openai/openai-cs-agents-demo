@@ -45,6 +45,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+On Windows PowerShell, activate the virtual environment with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
 For the UI, you can run:
 
 ```bash

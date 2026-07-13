@@ -1,0 +1,39 @@
+groups:
+  - name: enterprise-agent
+    rules:
+      - alert: EnterpriseAgentHighErrorRate
+        expr: >-
+          sum(rate(enterprise_agent_http_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(enterprise_agent_http_requests_total[5m])), 1e-9) > 0.02
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Enterprise Agent 5xx rate exceeds 2 percent
+          runbook: docs/runbooks/incident-response.md
+      - alert: EnterpriseAgentBackendUnavailable
+        expr: up{job="enterprise-agent-backend"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: Enterprise Agent backend metrics endpoint is unavailable
+          runbook: docs/runbooks/incident-response.md
+      - alert: EnterpriseAgentConnectorUnavailable
+        expr: sum(increase(enterprise_agent_connector_requests_total{status="unavailable"}[10m])) > 5
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A read-only connector is repeatedly unavailable
+          runbook: docs/runbooks/incident-response.md
+      - alert: EnterpriseAgentSlowFirstResponse
+        expr: >-
+          sum(rate(enterprise_agent_run_duration_seconds_sum[5m]))
+          / clamp_min(sum(rate(enterprise_agent_run_duration_seconds_count[5m])), 1e-9) > 5
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Average Agent run duration exceeds the pilot target
+          runbook: docs/runbooks/incident-response.md

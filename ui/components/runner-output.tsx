@@ -226,14 +226,14 @@ export function RunnerOutput({ runnerEvents }: RunnerOutputProps) {
   return (
     <div className="flex-1 overflow-hidden">
       <PanelSection
-        title="Runner Output"
-        icon={<MessageSquareMore className="h-4 w-4 text-blue-600" />}
+        title="执行轨迹"
+        icon={<MessageSquareMore className="h-4 w-4 text-teal-700" />}
       >
         <ScrollArea className="h-[calc(100%-2rem)] rounded-md border border-gray-200 bg-gray-100 shadow-sm">
           <div className="p-3 space-y-2.5">
             {runnerEvents.length === 0 ? (
               <p className="text-center text-zinc-500 p-4">
-                No runner events yet
+                暂无执行事件
               </p>
             ) : (
               groupedEvents.map((group) => {

@@ -1,7 +1,9 @@
+import { authenticatedFetch } from "./auth";
+
 // Fetch ChatKit thread state for the Agent panel
 export async function fetchThreadState(threadId: string) {
   try {
-    const res = await fetch(`/chatkit/state?thread_id=${encodeURIComponent(threadId)}`);
+    const res = await authenticatedFetch(`/chatkit/state?thread_id=${encodeURIComponent(threadId)}`);
     if (!res.ok) throw new Error(`State API error: ${res.status}`);
     return res.json();
   } catch (err) {
@@ -12,7 +14,7 @@ export async function fetchThreadState(threadId: string) {
 
 export async function fetchBootstrapState() {
   try {
-    const res = await fetch(`/chatkit/bootstrap`);
+    const res = await authenticatedFetch(`/chatkit/bootstrap`);
     if (!res.ok) throw new Error(`Bootstrap API error: ${res.status}`);
     return res.json();
   } catch (err) {

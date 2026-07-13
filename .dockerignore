@@ -1,0 +1,13 @@
+.git
+.gitignore
+**/.DS_Store
+**/.env
+**/.env.local
+**/.next
+**/.pytest_cache
+**/.venv
+**/__pycache__
+**/data
+**/node_modules
+evals/results
+output

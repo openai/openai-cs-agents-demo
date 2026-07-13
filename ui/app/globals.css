@@ -13,7 +13,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 217 91% 60%;
+    --primary: 173 80% 27%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96.1%;
@@ -30,7 +30,7 @@
 
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 217 91% 60%;
+    --ring: 173 80% 27%;
 
     --radius: 0.5rem;
   }
@@ -72,6 +72,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    letter-spacing: 0;
+    overflow: hidden;
   }
 }
-

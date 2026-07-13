@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot } from "lucide-react";
+import { Activity, Bot } from "lucide-react";
 import type { Agent, AgentEvent, GuardrailCheck } from "@/lib/types";
 import { AgentsList } from "./agents-list";
 import { Guardrails } from "./guardrails";
@@ -28,18 +28,21 @@ export function AgentPanel({
   );
 
   return (
-    <div className="w-3/5 h-full flex flex-col border-r border-gray-200 bg-white rounded-xl shadow-sm">
-      <div className="bg-blue-600 text-white h-12 px-4 flex items-center gap-3 shadow-sm rounded-t-xl">
-        <Bot className="h-5 w-5" />
-        <h1 className="font-semibold text-sm sm:text-base lg:text-lg">
-          Agent View
-        </h1>
-        <span className="ml-auto text-xs font-light tracking-wide opacity-80">
-          Airline&nbsp;Co.
+    <section className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col bg-zinc-50">
+      <div className="flex h-14 min-w-0 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 sm:px-5">
+        <span className="flex h-8 w-8 items-center justify-center bg-teal-700 text-white">
+          <Bot className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-semibold text-zinc-900">企业 Agent 编排工作台</h1>
+          <p className="truncate text-xs text-zinc-500">支持、售前与合规协作</p>
+        </div>
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-zinc-500">
+          <Activity className="h-3.5 w-3.5 text-emerald-600" /> 实时运行
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5">
         <AgentsList agents={agents} currentAgent={currentAgent} />
         <ConversationContext context={context} />
         <Guardrails
@@ -48,6 +51,6 @@ export function AgentPanel({
         />
         <RunnerOutput runnerEvents={runnerEvents} />
       </div>
-    </div>
+    </section>
   );
 }

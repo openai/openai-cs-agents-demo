@@ -13,14 +13,15 @@ interface GuardrailsProps {
 
 export function Guardrails({ guardrails, inputGuardrails }: GuardrailsProps) {
   const guardrailNameMap: Record<string, string> = {
-    relevance_guardrail: "Relevance Guardrail",
-    jailbreak_guardrail: "Jailbreak Guardrail",
+    relevance_guardrail: "Enterprise Relevance Guardrail",
+    jailbreak_guardrail: "Prompt Safety Guardrail",
+    sensitive_data_guardrail: "Tenant Data Guardrail",
   };
 
   const guardrailDescriptionMap: Record<string, string> = {
-    "Relevance Guardrail": "Ensure messages are relevant to airline support",
-    "Jailbreak Guardrail":
-      "Detect and block attempts to bypass or override system instructions",
+    "Enterprise Relevance Guardrail": "限制在企业 AI 服务范围内",
+    "Prompt Safety Guardrail": "检测提示词注入和越权工具调用",
+    "Tenant Data Guardrail": "阻止凭据泄露和跨租户数据访问",
   };
 
   const extractGuardrailName = (rawName: string): string =>
@@ -43,14 +44,14 @@ export function Guardrails({ guardrails, inputGuardrails }: GuardrailsProps) {
 
   return (
     <PanelSection
-      title="Guardrails"
-      icon={<Shield className="h-4 w-4 text-blue-600" />}
+      title="安全护栏"
+      icon={<Shield className="h-4 w-4 text-teal-700" />}
     >
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {guardrailsToShow.map((gr) => (
           <Card
             key={gr.id}
-            className={`bg-white border-gray-200 transition-all ${
+            className={`rounded-md border-zinc-200 bg-white transition-all ${
               !gr.input ? "opacity-60" : ""
             }`}
           >
@@ -70,12 +71,12 @@ export function Guardrails({ guardrails, inputGuardrails }: GuardrailsProps) {
                 {!gr.input || gr.passed ? (
                   <Badge className="mt-2 px-2 py-1 bg-emerald-500 hover:bg-emerald-600 flex items-center text-white">
                     <CheckCircle className="h-4 w-4 mr-1 text-white" />
-                    Passed
+                    通过
                   </Badge>
                 ) : (
                   <Badge className="mt-2 px-2 py-1 bg-red-500 hover:bg-red-600 flex items-center text-white">
                     <XCircle className="h-4 w-4 mr-1 text-white" />
-                    Failed
+                    拦截
                   </Badge>
                 )}
               </div>

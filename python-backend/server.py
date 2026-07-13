@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import json
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -26,27 +26,32 @@ from chatkit.server import ChatKitServer
 from chatkit.types import (
     Action,
     AssistantMessageContent,
+    AssistantMessageContentPartTextDelta,
     AssistantMessageItem,
     ClientEffectEvent,
+    ThreadItemAddedEvent,
     ThreadItemDoneEvent,
     ThreadMetadata,
     ThreadStreamEvent,
+    ThreadItemUpdatedEvent,
     UserMessageItem,
     WidgetItem,
     ProgressUpdateEvent,
 )
 from chatkit.store import NotFoundError
 
-from airline.context import AirlineAgentChatContext, AirlineAgentContext, create_initial_context, public_context
-from airline.agents import (
-    booking_cancellation_agent,
-    faq_agent,
-    flight_information_agent,
-    refunds_compensation_agent,
-    seat_special_services_agent,
-    triage_agent,
+from enterprise_support.context import (
+    EnterpriseAgentChatContext,
+    EnterpriseAgentContext,
+    create_initial_context,
+    public_context,
 )
-from memory_store import MemoryStore
+from enterprise_support.agents import ALL_AGENTS, triage_agent
+from enterprise_support.identity import identity_from_context
+from enterprise_support.model_provider import ZAI_SETTINGS
+from enterprise_support.observability import METRICS
+from enterprise_support.security import redact_data
+from persistent_store import PersistentStore
 
 
 class AgentEvent(BaseModel):
@@ -69,14 +74,7 @@ class GuardrailCheck(BaseModel):
 
 def _get_agent_by_name(name: str):
     """Return the agent object by name."""
-    agents = {
-        triage_agent.name: triage_agent,
-        faq_agent.name: faq_agent,
-        seat_special_services_agent.name: seat_special_services_agent,
-        flight_information_agent.name: flight_information_agent,
-        booking_cancellation_agent.name: booking_cancellation_agent,
-        refunds_compensation_agent.name: refunds_compensation_agent,
-    }
+    agents = {agent.name: agent for agent in ALL_AGENTS}
     return agents.get(name, triage_agent)
 
 
@@ -106,14 +104,7 @@ def _build_agents_list() -> List[Dict[str, Any]]:
             "input_guardrails": [_get_guardrail_name(g) for g in getattr(agent, "input_guardrails", [])],
         }
 
-    return [
-        make_agent_dict(triage_agent),
-        make_agent_dict(faq_agent),
-        make_agent_dict(seat_special_services_agent),
-        make_agent_dict(flight_information_agent),
-        make_agent_dict(booking_cancellation_agent),
-        make_agent_dict(refunds_compensation_agent),
-    ]
+    return [make_agent_dict(agent) for agent in ALL_AGENTS]
 
 
 def _user_message_to_text(message: UserMessageItem) -> str:
@@ -136,40 +127,134 @@ def _parse_tool_args(raw_args: Any) -> Any:
     return raw_args
 
 
+def normalize_synthetic_item_id(
+    event: ThreadStreamEvent,
+    active_item_id: str | None,
+    generate_id: Callable[[], str],
+) -> tuple[ThreadStreamEvent, str | None]:
+    """Replace Chat Completions placeholder IDs with stable per-message IDs."""
+
+    synthetic_id = "__fake_id__"
+    if isinstance(event, ThreadItemAddedEvent) and event.item.id == synthetic_id:
+        active_item_id = generate_id()
+        return (
+            event.model_copy(
+                update={"item": event.item.model_copy(update={"id": active_item_id})}
+            ),
+            active_item_id,
+        )
+    if isinstance(event, ThreadItemUpdatedEvent) and event.item_id == synthetic_id:
+        item_id = active_item_id or generate_id()
+        return event.model_copy(update={"item_id": item_id}), item_id
+    if isinstance(event, ThreadItemDoneEvent) and event.item.id == synthetic_id:
+        item_id = active_item_id or generate_id()
+        return (
+            event.model_copy(
+                update={"item": event.item.model_copy(update={"id": item_id})}
+            ),
+            None,
+        )
+    return event, active_item_id
+
+
+def merge_text_delta_events(
+    pending: ThreadItemUpdatedEvent | None,
+    event: ThreadStreamEvent,
+) -> ThreadItemUpdatedEvent | None:
+    """Merge adjacent text deltas for the same message and content part."""
+
+    if not isinstance(event, ThreadItemUpdatedEvent) or not isinstance(
+        event.update, AssistantMessageContentPartTextDelta
+    ):
+        return None
+    if pending is None:
+        return event
+    if not isinstance(pending.update, AssistantMessageContentPartTextDelta):
+        return None
+    if (
+        pending.item_id != event.item_id
+        or pending.update.content_index != event.update.content_index
+    ):
+        return None
+    return pending.model_copy(
+        update={
+            "update": pending.update.model_copy(
+                update={"delta": pending.update.delta + event.update.delta}
+            )
+        }
+    )
+
+
 @dataclass
 class ConversationState:
     input_items: List[Any] = field(default_factory=list)
-    context: AirlineAgentContext = field(default_factory=create_initial_context)
+    context: EnterpriseAgentContext = field(default_factory=create_initial_context)
     current_agent_name: str = triage_agent.name
     events: List[AgentEvent] = field(default_factory=list)
     guardrails: List[GuardrailCheck] = field(default_factory=list)
 
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "input_items": [
+                item.model_dump(mode="json") if isinstance(item, BaseModel) else item
+                for item in self.input_items
+            ],
+            "context": self.context.model_dump(mode="json"),
+            "current_agent_name": self.current_agent_name,
+            "events": [event.model_dump(mode="json") for event in self.events],
+            "guardrails": [guardrail.model_dump(mode="json") for guardrail in self.guardrails],
+        }
 
-class AirlineServer(ChatKitServer[dict[str, Any]]):
-    def __init__(self) -> None:
-        self.store = MemoryStore()
+    @classmethod
+    def model_validate(cls, data: dict[str, Any]) -> "ConversationState":
+        return cls(
+            input_items=data.get("input_items", []),
+            context=EnterpriseAgentContext.model_validate(data.get("context", {})),
+            current_agent_name=data.get("current_agent_name", triage_agent.name),
+            events=[AgentEvent.model_validate(item) for item in data.get("events", [])],
+            guardrails=[GuardrailCheck.model_validate(item) for item in data.get("guardrails", [])],
+        )
+
+
+class EnterpriseSupportServer(ChatKitServer[dict[str, Any]]):
+    def __init__(self, store: PersistentStore | None = None) -> None:
+        self.store = store or PersistentStore()
         super().__init__(self.store)
         self._state: Dict[str, ConversationState] = {}
         self._listeners: Dict[str, list[asyncio.Queue]] = {}
         self._last_event_index: Dict[str, int] = {}
         self._last_snapshot: Dict[str, str] = {}
 
-    def _state_for_thread(self, thread_id: str) -> ConversationState:
-        if thread_id not in self._state:
-            self._state[thread_id] = ConversationState()
-        return self._state[thread_id]
+    def _state_for_thread(
+        self, thread_id: str, context: dict[str, Any]
+    ) -> ConversationState:
+        identity = identity_from_context(context)
+        cache_key = f"{identity.tenant_id}:{thread_id}"
+        if cache_key not in self._state:
+            persisted = self.store.load_conversation_state(thread_id, context)
+            self._state[cache_key] = (
+                ConversationState.model_validate(persisted)
+                if persisted
+                else ConversationState()
+            )
+        return self._state[cache_key]
+
+    def _persist_state(
+        self,
+        thread_id: str,
+        state: ConversationState,
+        context: dict[str, Any],
+    ) -> None:
+        self.store.save_conversation_state(thread_id, state.model_dump(), context)
 
     async def _ensure_thread(
         self, thread_id: Optional[str], context: dict[str, Any]
     ) -> ThreadMetadata:
         if thread_id:
-            try:
-                return await self.store.load_thread(thread_id, context)
-            except NotFoundError:
-                pass
+            return await self.store.load_thread(thread_id, context)
         new_thread = ThreadMetadata(id=self.store.generate_thread_id(context), created_at=datetime.now())
         await self.store.save_thread(new_thread, context)
-        self._state_for_thread(new_thread.id)
+        self._state_for_thread(new_thread.id, context)
         return new_thread
 
     async def ensure_thread(self, thread_id: Optional[str], context: dict[str, Any]) -> ThreadMetadata:
@@ -289,22 +374,32 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             elif isinstance(item, ToolCallItem):
                 tool_name = getattr(item.raw_item, "name", None)
                 raw_args = getattr(item.raw_item, "arguments", None)
+                safe_args = redact_data(
+                    _parse_tool_args(raw_args), mask_personal_data=True
+                )
                 ev = AgentEvent(
                     id=uuid4().hex,
                     type="tool_call",
                     agent=item.agent.name,
                     content=self._truncate(tool_name or ""),
-                    metadata={"tool_args": self._truncate(_parse_tool_args(raw_args))},
+                    metadata={"tool_args": self._truncate(safe_args)},
                     timestamp=now_ms,
                 )
                 events.append(ev)
             elif isinstance(item, ToolCallOutputItem):
+                raw_output = item.output
+                if isinstance(raw_output, str):
+                    try:
+                        raw_output = json.loads(raw_output)
+                    except json.JSONDecodeError:
+                        pass
+                safe_output = redact_data(raw_output, mask_personal_data=True)
                 ev = AgentEvent(
                     id=uuid4().hex,
                     type="tool_output",
                     agent=item.agent.name,
-                    content=self._truncate(str(item.output)),
-                    metadata={"tool_result": self._truncate(item.output)},
+                    content=self._truncate(str(safe_output)),
+                    metadata={"tool_result": self._truncate(safe_output)},
                     timestamp=now_ms,
                 )
                 events.append(ev)
@@ -317,23 +412,31 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         input_user_message: UserMessageItem | None,
         context: dict[str, Any],
     ) -> AsyncIterator[ThreadStreamEvent]:
-        state = self._state_for_thread(thread.id)
+        run_started = time.perf_counter()
+        state = self._state_for_thread(thread.id, context)
+        identity = identity_from_context(context)
+        state.context.tenant_id = identity.tenant_id
+        state.context.verified_identity = True
         user_text = ""
         if input_user_message is not None:
             user_text = _user_message_to_text(input_user_message)
             state.input_items.append({"content": user_text, "role": "user"})
 
         previous_context = public_context(state.context)
-        chat_context = AirlineAgentChatContext(
+        chat_context = EnterpriseAgentChatContext(
             thread=thread,
             store=self.store,
             request_context=context,
             state=state.context,
         )
         streamed_items_seen = 0
+        active_stream_item_id: str | None = None
+        pending_text_delta: ThreadItemUpdatedEvent | None = None
+        include_runner_events = bool(context.get("include_runner_events"))
 
         # Tell the client which thread to bind runner updates to before streaming starts.
-        yield ClientEffectEvent(name="runner_bind_thread", data={"thread_id": thread.id, "ts": time.time()})
+        if include_runner_events:
+            yield ClientEffectEvent(name="runner_bind_thread", data={"thread_id": thread.id, "ts": time.time()})
 
         try:
             result = Runner.run_streamed(
@@ -342,6 +445,21 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 context=chat_context,
             )
             async for event in stream_agent_response(chat_context, result):
+                event, active_stream_item_id = normalize_synthetic_item_id(
+                    event,
+                    active_stream_item_id,
+                    lambda: self.store.generate_item_id("message", thread, context),
+                )
+                merged_delta = merge_text_delta_events(pending_text_delta, event)
+                if merged_delta is not None:
+                    pending_text_delta = merged_delta
+                    if len(merged_delta.update.delta) < 24:
+                        continue
+                    event = merged_delta
+                    pending_text_delta = None
+                elif pending_text_delta is not None:
+                    yield pending_text_delta
+                    pending_text_delta = None
                 if isinstance(event, ProgressUpdateEvent) or getattr(event, "type", "") == "progress_update_event":
                     # Ignore progress updates for the Runner panel; ChatKit will handle them separately.
                     continue
@@ -356,19 +474,21 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                             state.events.extend(new_events)
                             state.current_agent_name = active_agent
                             await self._broadcast_state(thread, context)
-                            yield ClientEffectEvent(
-                                name="runner_state_update",
-                                data={"thread_id": thread.id, "ts": time.time()},
-                            )
-                            yield ClientEffectEvent(
-                                name="runner_event_delta",
-                                data={
-                                    "thread_id": thread.id,
-                                    "ts": time.time(),
-                                    "events": [e.model_dump() for e in new_events],
-                                },
-                            )
-                    except Exception as err:
+                            if include_runner_events:
+                                yield ClientEffectEvent(
+                                    name="runner_state_update",
+                                    data={"thread_id": thread.id, "ts": time.time()},
+                                )
+                                yield ClientEffectEvent(
+                                    name="runner_event_delta",
+                                    data={
+                                        "thread_id": thread.id,
+                                        "ts": time.time(),
+                                        "events": [e.model_dump() for e in new_events],
+                                    },
+                                )
+                    except (AttributeError, TypeError, ValueError):
+                        # Some ChatKit stream events are not Agents SDK run items.
                         pass
                 yield event
                 new_items = result.new_items[streamed_items_seen:]
@@ -380,20 +500,32 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     state.current_agent_name = active_agent
                     streamed_items_seen += len(new_items)
                     await self._broadcast_state(thread, context)
-                    yield ClientEffectEvent(
-                        name="runner_state_update",
-                        data={"thread_id": thread.id, "ts": time.time()},
-                    )
-                    yield ClientEffectEvent(
-                        name="runner_event_delta",
-                        data={
-                            "thread_id": thread.id,
-                            "ts": time.time(),
-                            "events": [e.model_dump() for e in new_events],
-                        },
-                    )
+                    if include_runner_events:
+                        yield ClientEffectEvent(
+                            name="runner_state_update",
+                            data={"thread_id": thread.id, "ts": time.time()},
+                        )
+                        yield ClientEffectEvent(
+                            name="runner_event_delta",
+                            data={
+                                "thread_id": thread.id,
+                                "ts": time.time(),
+                                "events": [e.model_dump() for e in new_events],
+                            },
+                        )
+            if pending_text_delta is not None:
+                yield pending_text_delta
         except MaxTurnsExceeded:
             await self._broadcast_state(thread, context)
+            self._record_trace(
+                identity,
+                context=context,
+                thread_id=thread.id,
+                state=state,
+                status="max_turns_exceeded",
+                started=run_started,
+            )
+            return
         except InputGuardrailTripwireTriggered as exc:
             failed_guardrail = exc.guardrail_result.guardrail
             gr_output = exc.guardrail_result.output.output_info
@@ -412,7 +544,7 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     )
                 )
             state.guardrails = checks
-            refusal = "Sorry, I can only answer questions related to airline travel."
+            refusal = "抱歉，我无法处理该请求。我只能协助 AI 产品、技术支持、解决方案、账户计费及安全合规相关问题。"
             state.input_items.append({"role": "assistant", "content": refusal})
             yield ThreadItemDoneEvent(
                 item=AssistantMessageItem(
@@ -421,6 +553,15 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                     created_at=datetime.now(),
                     content=[AssistantMessageContent(text=refusal)],
                 )
+            )
+            self._persist_state(thread.id, state, context)
+            self._record_trace(
+                identity,
+                context=context,
+                thread_id=thread.id,
+                state=state,
+                status="guardrail_blocked",
+                started=run_started,
             )
             return
         state.input_items = result.to_input_list()
@@ -453,19 +594,73 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
                 )
             )
         await self._broadcast_state(thread, context)
-        yield ClientEffectEvent(
-            name="runner_state_update",
-            data={"thread_id": thread.id, "ts": time.time()},
-        )
-        if new_events:
+        if include_runner_events:
             yield ClientEffectEvent(
-                name="runner_event_delta",
-                data={
-                    "thread_id": thread.id,
-                    "ts": time.time(),
-                    "events": [e.model_dump() for e in new_events],
-                },
+                name="runner_state_update",
+                data={"thread_id": thread.id, "ts": time.time()},
             )
+            if new_events:
+                yield ClientEffectEvent(
+                    name="runner_event_delta",
+                    data={
+                        "thread_id": thread.id,
+                        "ts": time.time(),
+                        "events": [e.model_dump() for e in new_events],
+                    },
+                )
+        self._record_trace(
+            identity,
+            context=context,
+            thread_id=thread.id,
+            state=state,
+            status="success",
+            started=run_started,
+        )
+
+    def _record_trace(
+        self,
+        identity,
+        *,
+        context: dict[str, Any],
+        thread_id: str,
+        state: ConversationState,
+        status: str,
+        started: float,
+    ) -> None:
+        duration_ms = (time.perf_counter() - started) * 1000
+        event_types = [event.type for event in state.events[-30:]]
+        tool_names = [
+            str(event.content)
+            for event in state.events[-30:]
+            if event.type == "tool_call" and event.content
+        ]
+        self.store.record_trace(
+            identity,
+            request_id=str(context.get("request_id") or f"run_{uuid4().hex[:16]}"),
+            thread_id=thread_id,
+            model=ZAI_SETTINGS.agent_model,
+            agent_name=state.current_agent_name,
+            status=status,
+            duration_ms=duration_ms,
+            event_summary={
+                "event_types": event_types,
+                "tool_names": tool_names,
+                "guardrails": [
+                    {"name": item.name, "passed": item.passed}
+                    for item in state.guardrails
+                ],
+            },
+        )
+        METRICS.increment(
+            "enterprise_agent_runs_total",
+            agent=state.current_agent_name,
+            status=status,
+        )
+        METRICS.observe(
+            "enterprise_agent_run_duration_seconds",
+            duration_ms / 1000,
+            agent=state.current_agent_name,
+        )
 
     async def action(
         self,
@@ -480,7 +675,12 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
 
     async def snapshot(self, thread_id: Optional[str], context: dict[str, Any]) -> Dict[str, Any]:
         thread = await self._ensure_thread(thread_id, context)
-        state = self._state_for_thread(thread.id)
+        identity = identity_from_context(context)
+        cache_key = f"{identity.tenant_id}:{thread.id}"
+        persisted = self.store.load_conversation_state(thread.id, context)
+        if persisted:
+            self._state[cache_key] = ConversationState.model_validate(persisted)
+        state = self._state_for_thread(thread.id, context)
         return {
             "thread_id": thread.id,
             "current_agent": state.current_agent_name,
@@ -488,6 +688,71 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
             "agents": _build_agents_list(),
             "events": [e.model_dump() for e in state.events],
             "guardrails": [g.model_dump() for g in state.guardrails],
+        }
+
+    async def respond_json(
+        self,
+        *,
+        message: str,
+        context: dict[str, Any],
+        thread_id: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        """Run one turn and return a compact JSON response for RoboAge.
+
+        ChatKit remains the native interactive protocol for the standalone app.
+        RoboAge uses this helper for a server-to-server JSON integration while
+        reusing the same thread state, guardrails, handoffs, tools, and traces.
+        """
+
+        thread = await self._ensure_thread(thread_id, context)
+        state = self._state_for_thread(thread.id, context)
+        if history and not state.input_items:
+            for item in history[-24:]:
+                role = "assistant" if item.get("role") == "assistant" else "user"
+                content = str(item.get("content") or "").strip()
+                if content:
+                    state.input_items.append({"role": role, "content": content})
+
+        user_message = UserMessageItem.model_validate(
+            {
+                "id": self.store.generate_item_id("message", thread, context),
+                "thread_id": thread.id,
+                "created_at": datetime.now(),
+                "content": [{"type": "input_text", "text": message}],
+                "inference_options": {},
+            }
+        )
+
+        delta_text: List[str] = []
+        done_text = ""
+        async for event in self.respond(thread, user_message, context):
+            if isinstance(event, ThreadItemUpdatedEvent) and isinstance(
+                event.update, AssistantMessageContentPartTextDelta
+            ):
+                delta_text.append(event.update.delta)
+            elif isinstance(event, ThreadItemDoneEvent) and isinstance(
+                event.item, AssistantMessageItem
+            ):
+                done_text = "".join(
+                    part.text
+                    for part in event.item.content
+                    if isinstance(getattr(part, "text", None), str)
+                )
+
+        answer = done_text or "".join(delta_text)
+        snapshot = await self.snapshot(thread.id, context)
+        state = self._state_for_thread(thread.id, context)
+        return {
+            "answer": answer,
+            "thread_id": thread.id,
+            "current_agent": state.current_agent_name,
+            "context": snapshot["context"],
+            "citations": [
+                {"source": source}
+                for source in state.context.source_refs
+                if isinstance(source, str) and source
+            ],
         }
 
     # -- Streaming state updates to UI listeners ---------------------------------
@@ -519,6 +784,8 @@ class AirlineServer(ChatKitServer[dict[str, Any]]):
         self._unregister_listener(thread_id, queue)
 
     async def _broadcast_state(self, thread: ThreadMetadata, context: dict[str, Any]) -> None:
+        state = self._state_for_thread(thread.id, context)
+        self._persist_state(thread.id, state, context)
         listeners = self._listeners.get(thread.id, [])
         if not listeners:
             return

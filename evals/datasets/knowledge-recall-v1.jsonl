@@ -1,0 +1,6 @@
+{"id":"knowledge-recall-001","query":"429 timeout retry exponential backoff guidance","expected_document_ids":["doc_platform-api-reliability"],"category":"product","critical":true,"tags":["api","reliability"]}
+{"id":"knowledge-recall-002","query":"specialist handoffs tool execution streaming trace debugging","expected_document_ids":["doc_platform-agent-overview"],"category":"product","critical":false,"tags":["agent","platform"]}
+{"id":"knowledge-recall-003","query":"retrieval permissions source identifiers grounded answer","expected_document_ids":["doc_platform-rag"],"category":"product","critical":true,"tags":["knowledge","citations"]}
+{"id":"knowledge-recall-004","query":"SSO role based access audit logs retention private network","expected_document_ids":["doc_platform-security"],"category":"compliance","critical":true,"tags":["security","access-control"]}
+{"id":"knowledge-recall-005","query":"SOC 2 report trust center NDA workflow","expected_document_ids":["doc_platform-soc2"],"category":"compliance","critical":true,"tags":["soc2","trust-center"]}
+{"id":"knowledge-recall-006","query":"data retention policy contract configurable duration","expected_document_ids":["doc_platform-retention"],"category":"compliance","critical":true,"tags":["retention","policy"]}

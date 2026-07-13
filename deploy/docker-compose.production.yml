@@ -1,0 +1,130 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: enterprise_agent
+      POSTGRES_USER: enterprise_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enterprise_agent -d enterprise_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - object_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing local/enterprise-agent &&
+        mc anonymous set none local/enterprise-agent
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+  backend:
+    build:
+      context: ..
+      dockerfile: python-backend/Dockerfile
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://enterprise_agent:${POSTGRES_PASSWORD}@postgres:5432/enterprise_agent
+      OBJECT_STORAGE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: enterprise-agent
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      DOCUMENT_PROCESSING_MODE: async
+      CLAMAV_COMMAND: clamscan
+      CLAMAV_REQUIRED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  document-worker:
+    build:
+      context: ..
+      dockerfile: python-backend/Dockerfile
+    command: ["python", "scripts/document_worker.py"]
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://enterprise_agent:${POSTGRES_PASSWORD}@postgres:5432/enterprise_agent
+      OBJECT_STORAGE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: enterprise-agent
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      CLAMAV_COMMAND: clamscan
+      CLAMAV_REQUIRED: "1"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: ui/Dockerfile
+      args:
+        NEXT_PUBLIC_CHATKIT_DOMAIN_KEY: ${NEXT_PUBLIC_CHATKIT_DOMAIN_KEY}
+        NEXT_PUBLIC_AUTH_MODE: oidc
+        BACKEND_INTERNAL_URL: http://backend:8000
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+
+volumes:
+  postgres_data:
+  object_data:
+  prometheus_data:

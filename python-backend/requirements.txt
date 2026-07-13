@@ -3,3 +3,12 @@ openai-chatkit
 pydantic
 fastapi
 uvicorn
+python-dotenv
+PyJWT[crypto]
+pypdf
+python-docx
+python-multipart
+cryptography
+httpx
+psycopg[binary]
+boto3

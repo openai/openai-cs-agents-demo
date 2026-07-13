@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const backendUrl = process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000";
+
 const nextConfig = {
   devIndicators: false,
   // Proxy /chat requests to the backend server
@@ -6,15 +8,23 @@ const nextConfig = {
     return [
       {
         source: "/chat",
-        destination: "http://127.0.0.1:8000/chat",
+        destination: `${backendUrl}/chat`,
       },
       {
         source: "/chatkit",
-        destination: "http://127.0.0.1:8000/chatkit",
+        destination: `${backendUrl}/chatkit`,
       },
       {
         source: "/chatkit/:path*",
-        destination: "http://127.0.0.1:8000/chatkit/:path*",
+        destination: `${backendUrl}/chatkit/:path*`,
+      },
+      {
+        source: "/v1/:path*",
+        destination: `${backendUrl}/v1/:path*`,
+      },
+      {
+        source: "/auth/:path*",
+        destination: `${backendUrl}/auth/:path*`,
       },
     ];
   },

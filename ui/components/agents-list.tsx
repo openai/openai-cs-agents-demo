@@ -2,7 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot } from "lucide-react";
+import { Bot, Circle } from "lucide-react";
 import { PanelSection } from "./panel-section";
 import type { Agent } from "@/lib/types";
 
@@ -15,27 +15,28 @@ export function AgentsList({ agents, currentAgent }: AgentsListProps) {
   const activeAgent = agents.find((a) => a.name === currentAgent);
   return (
     <PanelSection
-      title="Available Agents"
-      icon={<Bot className="h-4 w-4 text-blue-600" />}
+      title="Agent 团队"
+      icon={<Bot className="h-4 w-4 text-teal-700" />}
     >
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {agents.map((agent) => (
           <Card
             key={agent.name}
-            className={`bg-white border-gray-200 h-[130px] transition-all ${
+            className={`min-h-[112px] rounded-md border-zinc-200 bg-white transition-all ${
               agent.name === currentAgent ||
               activeAgent?.handoffs.includes(agent.name)
                 ? ""
                 : "opacity-50 filter grayscale cursor-not-allowed pointer-events-none"
             } ${
               agent.name === currentAgent
-                ? "ring-1 ring-blue-500 shadow-md"
+                ? "border-teal-600 ring-1 ring-teal-600"
                 : ""
             }`}
           >
             <CardHeader className="p-3 pb-1">
-              <CardTitle className="text-sm flex items-center text-zinc-900">
-                {agent.name}
+              <CardTitle className="flex items-start gap-2 text-sm leading-5 text-zinc-900">
+                <Circle className={`mt-1 h-2.5 w-2.5 shrink-0 ${agent.name === currentAgent ? "fill-emerald-500 text-emerald-500" : "fill-zinc-200 text-zinc-200"}`} />
+                <span>{agent.name}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-1">
@@ -43,8 +44,8 @@ export function AgentsList({ agents, currentAgent }: AgentsListProps) {
                 {agent.description}
               </p>
               {agent.name === currentAgent && (
-                <Badge className="mt-2 bg-blue-600 hover:bg-blue-700 text-white">
-                  Active
+                <Badge className="mt-2 rounded-sm bg-teal-700 text-white hover:bg-teal-700">
+                  当前执行
                 </Badge>
               )}
             </CardContent>

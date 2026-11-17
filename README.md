@@ -82,6 +82,34 @@ This command will also start the backend.
 
 This app is designed for demonstration purposes. Feel free to update the agent prompts, guardrails, and tools to fit your own customer service workflows or experiment with new use cases! The modular structure makes it easy to extend or modify the orchestration logic for your needs.
 
+### Optional public help lookup
+
+The FAQ Agent normally uses only the demo airline's fixed policy answers. To also
+look up public travel help pages using Parallel, set this before starting the backend
+(or before `npm run dev`):
+
+```bash
+export ENABLE_PUBLIC_HELP_LOOKUP=1
+```
+
+Then ask in the existing chat: "Find the official TSA help page about carry-on
+liquids and include the source link." Triage routes the request to the FAQ Agent,
+which can use `public_help_lookup` and include the original page URL in its reply.
+The existing airline policy questions still use `faq_lookup_tool`.
+
+This uses the Agents SDK's MCP client and Parallel's anonymous, rate-limited web
+search. No Parallel account or key is needed; the app still requires the OpenAI
+API key described above. See [Parallel MCP setup](https://docs.parallel.ai/integrations/mcp/quickstart).
+The lookup sends a public topic query to Parallel. Use public questions only;
+the agent is instructed to leave private passenger and booking details out of queries.
+Public guidance does not replace the demo's mock policies or authorize account
+actions. If lookup fails, the agent should report that it could not verify the
+guidance.
+
+Unset `ENABLE_PUBLIC_HELP_LOOKUP` (or set it to `0`) and restart the backend to
+disable the extra tool. It is disabled by default and makes no MCP connection
+until called.
+
 ## Agents included
 
 - Triage Agent: entry point that routes to specialists.
